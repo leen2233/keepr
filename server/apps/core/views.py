@@ -5,9 +5,10 @@ import shutil
 import tempfile
 import zipfile
 import json
+import uuid
 from datetime import datetime
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction, connections
 from django.utils import timezone
 from django.http import HttpResponse
 from rest_framework import status
@@ -19,8 +20,10 @@ import boto3
 from botocore.exceptions import ClientError
 
 from .models import BackupSettings, BackupLog
-from apps.items.models import Item
-from apps.items.models import Tag
+from apps.items.models import Item, Tag, ItemTag
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 class BackupSettingsSerializer(serializers.ModelSerializer):
@@ -477,3 +480,401 @@ class ExportDataView(APIView):
             # Clean up temp file
             if os.path.exists(zip_path):
                 os.remove(zip_path)
+
+
+class ImportDataView(APIView):
+    """
+    Import user's data from a previously exported ZIP file.
+    Regular users can only import their own personal data.
+    Staff/superuser can import full backups (all users' data).
+    """
+
+    def post(self, request: Request) -> Response:
+        user = request.user
+        # FormData sends strings, so we need to convert properly
+        full_import_val = request.data.get("full_import", "false")
+        is_full_import = str(full_import_val).lower() in ("true", "1", "yes")
+
+        # Check for explicit confirmation for full import
+        if is_full_import:
+            confirmed = request.data.get("confirmed", "false")
+            if str(confirmed).lower() not in ("true", "1", "yes"):
+                return Response({
+                    "error": {
+                        "code": "CONFIRMATION_REQUIRED",
+                        "message": "Full backup import is a dangerous operation. All current data will be replaced with the backup data. You will need to log in again after import. Please confirm by sending confirmed=true."
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Only staff/superuser can perform full imports
+        if is_full_import and not (user.is_staff or user.is_superuser):
+            return Response(
+                {"error": {"code": "PERMISSION_DENIED", "message": "Full backup import is only available to administrators."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Check if file was uploaded
+        if "file" not in request.FILES:
+            return Response(
+                {"error": {"code": "NO_FILE", "message": "No backup file provided."}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        uploaded_file = request.FILES["file"]
+
+        # Validate file is a ZIP
+        if not uploaded_file.name.endswith(".zip"):
+            return Response(
+                {"error": {"code": "INVALID_FILE", "message": "Backup file must be a ZIP archive."}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Create temp file to process the ZIP
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_file:
+            for chunk in uploaded_file.chunks():
+                tmp_file.write(chunk)
+            zip_path = tmp_file.name
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zipf:
+                # Check for required files
+                file_list = zipf.namelist()
+
+                # Validate ZIP structure based on import type
+                if is_full_import:
+                    # Full backup should have database dump
+                    has_db = "database.sql" in file_list or "database.sqlite3" in file_list
+                    if not has_db:
+                        return Response(
+                            {"error": {"code": "INVALID_BACKUP", "message": "Full backup must contain database dump."}},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    return self._import_full_backup(zipf, file_list, user)
+                else:
+                    # Personal import should have items.json
+                    if "items.json" not in file_list:
+                        return Response(
+                            {"error": {"code": "INVALID_BACKUP", "message": "Personal backup must contain items.json."}},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    return self._import_personal_data(zipf, file_list, user)
+
+        except zipfile.BadZipFile:
+            return Response(
+                {"error": {"code": "INVALID_ZIP", "message": "The uploaded file is not a valid ZIP archive."}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            return Response(
+                {"error": {"code": "IMPORT_FAILED", "message": str(e)}},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        finally:
+            # Clean up temp file
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+
+    def _import_personal_data(self, zipf: zipfile.ZipFile, file_list: list[str], user: User) -> Response:
+        """Import user's personal data from exported ZIP."""
+        import_summary = {"items_imported": 0, "tags_imported": 0, "files_imported": 0, "errors": []}
+
+        try:
+            with transaction.atomic():
+                # Read and import tags first (items reference tags)
+                if "tags.json" in file_list:
+                    tags_json = zipf.read("tags.json").decode("utf-8")
+                    tags_data = json.loads(tags_json)
+
+                    # Create a mapping of old tag IDs to new tag IDs
+                    tag_id_map = {}
+
+                    for tag_data in tags_data:
+                        # Check if tag with same name already exists for this user
+                        existing_tag = Tag.objects.filter(user=user, name=tag_data["name"]).first()
+                        if existing_tag:
+                            tag_id_map[tag_data["id"]] = str(existing_tag.id)
+                        else:
+                            # Create new tag
+                            new_tag = Tag.objects.create(
+                                user=user,
+                                name=tag_data["name"],
+                                color=tag_data["color"],
+                            )
+                            tag_id_map[tag_data["id"]] = str(new_tag.id)
+                            import_summary["tags_imported"] += 1
+
+                # Read and import items
+                items_json = zipf.read("items.json").decode("utf-8")
+                items_data = json.loads(items_json)
+
+                for item_data in items_data:
+                    try:
+                        # Create new item
+                        new_item = Item.objects.create(
+                            user=user,
+                            type=item_data["type"],
+                            title=item_data.get("title", ""),
+                            content=item_data.get("content", ""),
+                            file_name=item_data.get("file_name", ""),
+                            file_size=item_data.get("file_size"),
+                            file_mimetype=item_data.get("file_mimetype", ""),
+                            # Preserve original timestamps if available
+                            created_at=item_data.get("created_at", timezone.now()),
+                            updated_at=item_data.get("updated_at", timezone.now()),
+                        )
+
+                        # Handle file if present
+                        if item_data.get("file_name") and new_item.file_name:
+                            # Find the file in the ZIP - could be in a subfolder
+                            # Export structure: media/{user_id}/subfolder/filename
+                            # We need to find any path that ends with the filename
+                            filename = item_data["file_name"]
+                            matching_path = None
+                            for path in file_list:
+                                if path.startswith(f"media/") and path.endswith(filename):
+                                    matching_path = path
+                                    break
+
+                            if matching_path:
+                                # Extract file to media directory
+                                user_media_dir = os.path.join(settings.MEDIA_ROOT, str(user.id))
+                                os.makedirs(user_media_dir, exist_ok=True)
+
+                                file_path = os.path.join(user_media_dir, filename)
+                                with open(file_path, "wb") as f:
+                                    f.write(zipf.read(matching_path))
+
+                                new_item.file_path = file_path
+                                new_item.save()
+                                import_summary["files_imported"] += 1
+
+                        # Import tags
+                        if "tags" in item_data and item_data["tags"]:
+                            for tag_ref in item_data["tags"]:
+                                old_tag_id = tag_ref["id"]
+                                if old_tag_id in tag_id_map:
+                                    new_tag_id = tag_id_map[old_tag_id]
+                                    try:
+                                        tag = Tag.objects.get(id=new_tag_id, user=user)
+                                        ItemTag.objects.create(item=new_item, tag=tag)
+                                    except Tag.DoesNotExist:
+                                        pass  # Skip if tag doesn't exist
+
+                        import_summary["items_imported"] += 1
+
+                    except Exception as e:
+                        import_summary["errors"].append(f"Failed to import item {item_data.get('id', 'unknown')}: {str(e)}")
+
+            return Response({
+                "data": {
+                    "message": "Data imported successfully",
+                    "summary": import_summary,
+                }
+            })
+
+        except Exception as e:
+            raise Exception(f"Failed to import personal data: {str(e)}")
+
+    def _import_full_backup(self, zipf: zipfile.ZipFile, file_list: list[str], user: User) -> Response:
+        """Import full backup from admin backup ZIP - restores database dump and media files."""
+        import_summary = {"files_imported": 0, "database_restored": False, "errors": [], "pre_import_backup": None}
+
+        # First, create a backup of current data before proceeding
+        try:
+            # Create backup in temp first
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_file:
+                temp_backup_path = tmp_file.name
+
+            with zipfile.ZipFile(temp_backup_path, "w", zipfile.ZIP_DEFLATED) as zipf_backup:
+                # Backup database
+                db_backend = settings.DATABASES["default"]["ENGINE"]
+
+                if "postgresql" in db_backend:
+                    db_config = settings.DATABASES["default"]
+                    dump_cmd = [
+                        "pg_dump",
+                        f"--host={db_config['HOST']}",
+                        f"--port={db_config['PORT']}",
+                        f"--username={db_config['USER']}",
+                        db_config["NAME"],
+                    ]
+                    env = os.environ.copy()
+                    env["PGPASSWORD"] = db_config["PASSWORD"]
+
+                    result = subprocess.run(dump_cmd, env=env, capture_output=True, text=True, check=True)
+                    zipf_backup.writestr("database.sql", result.stdout)
+                else:
+                    db_path = settings.DATABASES["default"]["NAME"]
+                    if os.path.exists(db_path):
+                        zipf_backup.write(db_path, "database.sqlite3")
+
+                # Backup media files
+                media_root = settings.MEDIA_ROOT
+                if os.path.exists(media_root):
+                    for root, dirs, files in os.walk(media_root):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.join("media", os.path.relpath(file_path, media_root))
+                            zipf_backup.write(file_path, arcname)
+
+            # Move to local backup directory if configured
+            local_backup_dir = getattr(settings, "LOCAL_BACKUP_DIR", None)
+            if local_backup_dir:
+                os.makedirs(local_backup_dir, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                final_backup_path = os.path.join(local_backup_dir, f"pre_import_restore_{timestamp}.zip")
+                shutil.move(temp_backup_path, final_backup_path)
+                import_summary["pre_import_backup"] = final_backup_path
+            else:
+                # Keep in temp if no backup dir configured
+                import_summary["pre_import_backup"] = temp_backup_path
+
+        except Exception as e:
+            # If backup fails, warn but don't stop the import
+            import_summary["errors"].append(f"Pre-import backup failed (continuing anyway): {str(e)}")
+
+        try:
+            # First, extract media files
+            media_root = settings.MEDIA_ROOT
+            os.makedirs(media_root, exist_ok=True)
+
+            for file_path in file_list:
+                if file_path.startswith("media/"):
+                    # Extract to media directory
+                    full_path = os.path.join(media_root, os.path.relpath(file_path, "media/"))
+                    dir_path = os.path.dirname(full_path)
+                    os.makedirs(dir_path, exist_ok=True)
+
+                    with open(full_path, "wb") as f:
+                        f.write(zipf.read(file_path))
+                    import_summary["files_imported"] += 1
+
+            # Restore database from dump
+            db_backend = settings.DATABASES["default"]["ENGINE"]
+
+            if "postgresql" in db_backend and "database.sql" in file_list:
+                # PostgreSQL restore
+                db_config = settings.DATABASES["default"]
+
+                # Extract SQL to temp file
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".sql", delete=False) as tmp_sql:
+                    tmp_sql.write(zipf.read("database.sql").decode("utf-8"))
+                    sql_path = tmp_sql.name
+
+                try:
+                    # Close Django connections before database operations
+                    connections.close_all()
+
+                    # First, terminate all connections to the database
+                    terminate_cmd = [
+                        "psql",
+                        f"--host={db_config['HOST']}",
+                        f"--port={db_config['PORT']}",
+                        f"--username={db_config['USER']}",
+                        "postgres",
+                        "-c", f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '{db_config['NAME']}' AND pid <> pg_backend_pid();",
+                    ]
+                    env = os.environ.copy()
+                    env["PGPASSWORD"] = db_config["PASSWORD"]
+
+                    subprocess.run(terminate_cmd, env=env, capture_output=True, check=False)
+
+                    # Drop and recreate database
+                    drop_cmd = [
+                        "psql",
+                        f"--host={db_config['HOST']}",
+                        f"--port={db_config['PORT']}",
+                        f"--username={db_config['USER']}",
+                        "postgres",
+                        "-c", f"DROP DATABASE IF EXISTS {db_config['NAME']};",
+                        "-c", f"CREATE DATABASE {db_config['NAME']};",
+                    ]
+
+                    # Drop and recreate
+                    subprocess.run(drop_cmd, env=env, capture_output=True, check=True)
+
+                    # Restore the database
+                    restore_cmd = [
+                        "psql",
+                        f"--host={db_config['HOST']}",
+                        f"--port={db_config['PORT']}",
+                        f"--username={db_config['USER']}",
+                        db_config["NAME"],
+                    ]
+
+                    with open(sql_path, "r") as sql_file:
+                        result = subprocess.run(
+                            restore_cmd, env=env, stdin=sql_file, capture_output=True, text=True
+                        )
+
+                    if result.returncode != 0:
+                        raise Exception(f"Database restore failed: {result.stderr}")
+
+                    import_summary["database_restored"] = True
+
+                finally:
+                    if os.path.exists(sql_path):
+                        os.remove(sql_path)
+
+            elif "database.sqlite3" in file_list:
+                # SQLite restore
+                db_path = settings.DATABASES["default"]["NAME"]
+                db_dir = os.path.dirname(db_path)
+                os.makedirs(db_dir, exist_ok=True)
+
+                # Remove existing database
+                if os.path.exists(db_path):
+                    os.remove(db_path)
+
+                # Extract and restore
+                with open(db_path, "wb") as f:
+                    f.write(zipf.read("database.sqlite3"))
+
+                import_summary["database_restored"] = True
+            else:
+                return Response(
+                    {"error": {"code": "INVALID_BACKUP", "message": "Full backup must contain database.sql or database.sqlite3"}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Count restored items
+            items_count = Item.objects.count()
+            tags_count = Tag.objects.count()
+            users_count = User.objects.count()
+
+            return Response({
+                "data": {
+                    "message": f"Full backup restored successfully. Database and {import_summary['files_imported']} media files imported.",
+                    "summary": {
+                        **import_summary,
+                        "items_count": items_count,
+                        "tags_count": tags_count,
+                        "users_count": users_count,
+                    },
+                }
+            })
+
+        except subprocess.CalledProcessError as e:
+            return Response(
+                {"error": {"code": "DB_RESTORE_FAILED", "message": f"Database restore failed: {e.stderr if hasattr(e, 'stderr') else str(e)}"}},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        except Exception as e:
+            raise Exception(f"Failed to import full backup: {str(e)}")
+
+    def _get_or_create_user(self, old_user_id: str):
+        """
+        Get existing user by ID or create a placeholder user.
+        In production, you might want to handle this differently.
+        """
+        try:
+            return User.objects.get(id=old_user_id)
+        except User.DoesNotExist:
+            # Create a placeholder user with the old ID
+            # In production, you might want to notify admin about this
+            return User.objects.create(
+                id=uuid.UUID(old_user_id) if len(old_user_id.replace("-", "")) == 32 else uuid.uuid4(),
+                username=f"imported_user_{old_user_id[:8]}",
+                email=f"imported_{old_user_id[:8]}@placeholder.local",
+                email_verified=False,
+            )
