@@ -106,6 +106,10 @@
 - [x] Feed text selection
 - [x] Tag filtering fixes
 - [x] File upload CSRF fixes
+- [x] Backup feature (S3 integration, scheduled/manual backups, backup logs)
+- [x] Local backup option (server filesystem, keeps last 6 backups)
+- [x] Secret key security (never returned in API, only enter new value to change)
+- [x] Toggle switch positioning fix (overflow-hidden, correct translate calculation)
 
 ### Phase 5: Launch Prep
 - [ ] Run migrations and create database
@@ -130,6 +134,40 @@
 None currently - all reported issues have been resolved
 
 ## Evolution of Decisions
+
+### 2026-01-22 (Local Backup & Security Improvements)
+**Local Backup Feature:**
+- Added local backup option to save backups to server filesystem
+- Configurable via `LOCAL_BACKUP_DIR` in server .env
+- Automatically keeps last 6 backups per user, deletes oldest
+- Backup format: ZIP with database dump and user media files
+- Can be used alongside S3 backup (both or either)
+
+**Security Improvements:**
+- S3 secret key is never returned in API responses (shows as `********`)
+- Users can only enter NEW secret key value to change it
+- Existing secret key cannot be viewed
+
+### 2026-01-22 (Backup Feature & Toggle Fixes)
+**Backup Feature Implemented:**
+- Complete S3 backup integration with user-configurable settings
+- Automatic backup scheduling (hourly to monthly intervals)
+- Manual backup trigger on-demand
+- Backup logs with success/failure/skipped status tracking
+- "Only backup if new items added" option to save storage/bandwidth
+- S3 connection testing before enabling backups
+- Settings page UI for configuration (schedule, S3 credentials, intervals)
+
+**Toggle Switch Fixes:**
+- Fixed toggle switches positioning on Settings page
+- Added `overflow-hidden` to prevent circle from overflowing container
+- Corrected `translate-x` calculation using `calc(2.75rem-1.25rem-0.125rem)` for ON state
+- OFF state stays at `translate-x-0.5` (left side)
+
+**Key Patterns Established:**
+- Backup format: ZIP file containing database dump (SQL/SQLite), items JSON, and user media files
+- S3 key pattern: `keepr_backups/{user_id}/backup_{timestamp}.zip`
+- Toggle switches: Always use `overflow-hidden` on container, calculate translate based on width
 
 ### 2026-01-22 (Bug Fixes & UX Improvements)
 **Critical Fixes Applied:**
@@ -199,5 +237,5 @@ None currently
 1. **File content search**: Searching inside PDFs/docs requires external service (deferred)
 2. **Email delivery**: Gmail SMTP has limits; may need dedicated service for scale
 3. **Filesystem management**: Need proper cleanup when items are deleted (implemented)
-4. **Backup strategy**: Must backup both database and uploads directory
-5. **CSRF exemption**: FileUploadView bypasses CSRF - ensure this is acceptable for production
+4. **CSRF exemption**: FileUploadView bypasses CSRF - ensure this is acceptable for production
+5. **Backup dependencies**: Requires boto3 library and proper S3 credentials management

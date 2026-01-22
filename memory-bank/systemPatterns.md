@@ -20,8 +20,15 @@
 │   - Users                │    │   - Images               │
 │   - Items (text content) │    │   - Videos               │
 │   - Tags                 │    │   - Files                │
-│   - File metadata        │    │   - (served via API)     │
-└──────────────────────────┘    └──────────────────────────┘
+│   - BackupSettings       │    │   - (served via API)     │
+│   - BackupLogs           │    │                          │
+└──────────────────────────┘    └───────────┬───────────────┘
+                                            │
+                                 ┌──────────▼──────────────┐
+                                 │   S3 Storage (optional) │
+                                 │   - Automated backups   │
+                                 │   - User-configurable   │
+                                 └─────────────────────────┘
 ```
 
 ## Data Model
@@ -72,6 +79,40 @@
 {
   item_id: uuid (FK)
   tag_id: uuid (FK)
+}
+```
+
+**BackupSettings**
+```javascript
+{
+  id: uuid
+  user_id: uuid (FK, OneToOne)
+  interval_hours: integer (default: 24)
+  backup_on_new_item: boolean (default: true)
+  local_backup_enabled: boolean (default: false)
+  s3_enabled: boolean (default: false)
+  s3_bucket_name: string
+  s3_access_key: string
+  s3_secret_key: string (never returned in API responses)
+  s3_region: string (default: "us-east-1")
+  s3_endpoint: string (optional, for S3-compatible services)
+  last_backup_at: timestamp
+  last_item_count: integer (default: 0)
+  created_at: timestamp
+  updated_at: timestamp
+}
+```
+
+**BackupLogs**
+```javascript
+{
+  id: uuid
+  user_id: uuid (FK)
+  status: enum (success, failed, skipped)
+  message: text
+  items_backed_up: integer (default: 0)
+  files_backed_up: integer (default: 0)
+  created_at: timestamp
 }
 ```
 
@@ -137,6 +178,12 @@ GET    /api/items/search?q=...
 GET    /api/tags
 POST   /api/tags
 DELETE /api/tags/:id
+
+GET    /api/backup/settings
+PUT    /api/backup/settings
+GET    /api/backup/logs
+POST   /api/backup/manual
+POST   /api/backup/test-s3
 ```
 
 ### Response Format

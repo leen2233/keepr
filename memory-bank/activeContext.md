@@ -39,6 +39,25 @@ Testing the application and fixing bugs as they arise. The UI has been redesigne
 - Added manual session-based authentication check using `request.session.get('_auth_user_id')`
 - File upload now works correctly for authenticated users
 
+### Backup Feature Implementation
+- Full S3 backup integration with user-configurable settings
+- **Local backup option** - saves to server directory (configured via LOCAL_BACKUP_DIR in .env)
+- Automatic backup scheduling (hourly, 6-hourly, 12-hourly, daily, weekly, monthly)
+- Manual backup trigger via Settings page
+- Backup logs with success/failure/skipped status tracking
+- "Only backup if new items added" option to save storage/bandwidth
+- S3 connection testing before enabling backups (tests with current form values, saves manually)
+- **Local backup keeps last 6 backups per user, deletes oldest automatically**
+- **S3 secret key security** - never returned in API, shows as `********`, only enter new value to change
+- Backup format: ZIP containing database dump and user media files
+
+### Toggle Switch Fix
+- Fixed toggle switches on Settings page (backup_on_new_item, local_backup_enabled, s3_enabled toggles)
+- Added `overflow-hidden` to prevent circle from overflowing container border
+- Corrected `translate-x` calculation: ON state uses `translate-x-5` (20px), OFF state uses `translate-x-1` (4px)
+- Circle background: ON state uses `bg-neutral-900`, OFF state uses `bg-white`
+- Circle now properly positions left (OFF) and right (ON) without overflow
+
 ## Recent Decisions
 
 ### UI Design Evolution (2026-01-21)
@@ -137,3 +156,5 @@ Django REST Framework with:
 - React Query for server state
 - **FormData handling**: Use `key` without `[]`, backend uses `getlist("key")`
 - **CSRF exemption**: Use `@method_decorator(csrf_exempt, name='dispatch')` + manual auth check
+- **Backup**: S3 backups use boto3, ZIP format with database dump + items JSON + media files
+- **Toggle switches**: Always use `overflow-hidden` on container, calculate `translate-x` based on width (ON: `calc(2.75rem-1.25rem-0.125rem)`, OFF: `translate-x-0.5`)

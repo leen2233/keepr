@@ -123,3 +123,6 @@ MAX_TEXT_SIZE = int(os.getenv("MAX_TEXT_SIZE", 102400))  # 100KB
 MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE", 10485760))  # 10MB
 MAX_VIDEO_SIZE = int(os.getenv("MAX_VIDEO_SIZE", 104857600))  # 100MB
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 20971520))  # 20MB
+
+# Local backup directory
+LOCAL_BACKUP_DIR = os.getenv("LOCAL_BACKUP_DIR")

@@ -1,7 +1,7 @@
 import { Outlet, Link, useNavigate } from "react-router-dom"
 import { useAuthStore, useTheme } from "@/store"
 import { useLogout, useMe } from "@/hooks/use-auth"
-import { Moon, Sun, LogOut, Plus, Home, Box } from "lucide-react"
+import { Moon, Sun, LogOut, Plus, Home, Box, Settings } from "lucide-react"
 
 export function Layout() {
   const { isDark, toggleTheme } = useTheme()
@@ -35,6 +35,10 @@ export function Layout() {
               <>
                 <Link to="/" className="btn-ghost rounded-lg p-2" aria-label="Home">
                   <Home className="h-4 w-4" />
+                </Link>
+
+                <Link to="/settings" className="btn-ghost rounded-lg p-2" aria-label="Settings">
+                  <Settings className="h-4 w-4" />
                 </Link>
 
                 <button

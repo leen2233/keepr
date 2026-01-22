@@ -8,6 +8,7 @@ import { CreateItemPage } from "@/pages/CreateItemPage"
 import { EditItemPage } from "@/pages/EditItemPage"
 import { ItemDetailPage } from "@/pages/ItemDetailPage"
 import { SearchPage } from "@/pages/SearchPage"
+import { SettingsPage } from "@/pages/SettingsPage"
 import { useMe } from "@/hooks/use-auth"
 import { CircularProgress } from "./components/ui/CircularProgress"
 
@@ -48,6 +49,7 @@ function App() {
           <Route path="items/:id/edit" element={<EditItemPage />} />
           <Route path="items/:id" element={<ItemDetailPage />} />
           <Route path="search" element={<SearchPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </QueryProvider>
