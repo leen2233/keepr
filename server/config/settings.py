@@ -126,3 +126,6 @@ MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 20971520))  # 20MB
 
 # Local backup directory
 LOCAL_BACKUP_DIR = os.getenv("LOCAL_BACKUP_DIR")
+
+# Allow new user registrations
+ALLOW_SIGNUP = os.getenv("ALLOW_SIGNUP", "true").lower() == "true"

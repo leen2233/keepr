@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMe } from "@/hooks/use-auth"
 import api from "@/lib/api"
-import { ArrowLeft, Settings as SettingsIcon, Cloud, TestTube, Save, Check, X, Clock, HardDrive } from "lucide-react"
+import { ArrowLeft, Settings as SettingsIcon, Cloud, TestTube, Save, Check, X, Clock, HardDrive, Download, Lock } from "lucide-react"
 
 interface BackupSettings {
   interval_hours: number
@@ -39,8 +40,11 @@ export function SettingsPage() {
   const queryClient = useQueryClient()
   const [hasChanges, setHasChanges] = useState(false)
 
+  // Get current user
+  const { data: user } = useMe()
+
   // Fetch backup settings
-  const { data: settingsData, isLoading: settingsLoading } = useQuery({
+  const { data: settingsData, isLoading: settingsLoading, error: settingsError } = useQuery({
     queryKey: ["backup-settings"],
     queryFn: async () => {
       const response = await api.get("/backup/settings/")
@@ -55,6 +59,7 @@ export function SettingsPage() {
       const response = await api.get("/backup/logs/")
       return response.data.data.logs as BackupLog[]
     },
+    enabled: user?.is_staff ?? false, // Only fetch logs for staff
   })
 
   // Update settings mutation
@@ -95,6 +100,23 @@ export function SettingsPage() {
     },
   })
 
+  // Export data mutation (actually triggers a download)
+  const exportData = useMutation({
+    mutationFn: async () => {
+      const response = await api.post("/export/data/", {}, { responseType: "blob" })
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement("a")
+      link.href = url
+      link.setAttribute("download", `keepr_export_${user?.username}_${Date.now()}.zip`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      return response.data
+    },
+  })
+
   const [settings, setSettings] = useState<Partial<BackupSettings>>({})
 
   useEffect(() => {
@@ -115,9 +137,82 @@ export function SettingsPage() {
     updateSettings.mutate(settings)
   }
 
+  const handleExportData = () => {
+    exportData.mutate()
+  }
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "Never"
     return new Date(dateStr).toLocaleString()
+  }
+
+  // Show permission denied message for non-staff
+  if (settingsError) {
+    const errorCode = (settingsError as any).response?.data?.error?.code
+    if (errorCode === "PERMISSION_DENIED") {
+      return (
+        <div className="mx-auto max-w-3xl">
+          <div className="mb-6">
+            <h1 className="text-2xl font-semibold text-black dark:text-white">Settings</h1>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Manage your preferences</p>
+          </div>
+
+          {/* Export Data Section (available to all users) */}
+          <div className="card mb-6">
+            <div className="mb-6 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white dark:bg-white dark:text-black">
+                <Download className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-black dark:text-white">Export My Data</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Download all your items and media files</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700 dark:text-gray-300">
+                  Export all your items, tags, and uploaded files as a ZIP archive.
+                </p>
+              </div>
+              <button
+                onClick={handleExportData}
+                disabled={exportData.isPending}
+                className="btn-primary"
+              >
+                {exportData.isPending ? "Exporting..." : <><Download className="mr-1 h-4 w-4 inline" /> Export Data</>}
+              </button>
+            </div>
+            {exportData.data && (
+              <div className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+                <Check className="mr-1 inline h-4 w-4" />
+                Export started successfully
+              </div>
+            )}
+            {exportData.error && (
+              <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+                <X className="mr-1 inline h-4 w-4" />
+                Export failed. Please try again.
+              </div>
+            )}
+          </div>
+
+          {/* Backup Settings - Permission Denied */}
+          <div className="card">
+            <div className="flex items-center gap-3 rounded-lg bg-gray-50 p-6 dark:bg-white/5">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700">
+                <Lock className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-black dark:text-white">Admin Access Required</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Backup settings are managed by administrators only. Contact your server administrator if you need to configure backups.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
   }
 
   if (settingsLoading) {
@@ -133,377 +228,423 @@ export function SettingsPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-black dark:text-white">Settings</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Manage your backup preferences</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {user?.is_staff ? "Manage backup preferences" : "Manage your preferences"}
+          </p>
         </div>
       </div>
 
-      {/* Backup Settings */}
+      {/* Export Data Section (available to all users) */}
       <div className="card mb-6">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white dark:bg-white dark:text-black">
-            <Cloud className="h-5 w-5" />
+            <Download className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-black dark:text-white">Backup Configuration</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Configure automatic backups to S3 storage</p>
+            <h2 className="text-lg font-semibold text-black dark:text-white">Export My Data</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Download all your items and media files</p>
           </div>
         </div>
-
-        <div className="space-y-6">
-          {/* Schedule */}
+        <div className="flex items-center justify-between">
           <div>
-            <label className="mb-3 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              <Clock className="mr-1 inline h-4 w-4" />
-              Backup Schedule
-            </label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {INTERVAL_OPTIONS.map((option) => (
+            <p className="text-sm text-gray-700 dark:text-gray-300">
+              Export all your items, tags, and uploaded files as a ZIP archive.
+            </p>
+          </div>
+          <button
+            onClick={handleExportData}
+            disabled={exportData.isPending}
+            className="btn-primary"
+          >
+            {exportData.isPending ? "Exporting..." : <><Download className="mr-1 h-4 w-4 inline" /> Export Data</>}
+          </button>
+        </div>
+        {exportData.data && (
+          <div className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+            <Check className="mr-1 inline h-4 w-4" />
+            Export started successfully
+          </div>
+        )}
+        {exportData.error && (
+          <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+            <X className="mr-1 inline h-4 w-4" />
+            Export failed. Please try again.
+          </div>
+        )}
+      </div>
+
+      {/* Backup Settings - Staff Only */}
+      {user?.is_staff && settingsData && (
+        <>
+          {/* Backup Configuration */}
+          <div className="card mb-6">
+            <div className="mb-6 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white dark:bg-white dark:text-black">
+                <Cloud className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-black dark:text-white">Backup Configuration</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Configure automatic backups to S3 storage</p>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              {/* Schedule */}
+              <div>
+                <label className="mb-3 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <Clock className="mr-1 inline h-4 w-4" />
+                  Backup Schedule
+                </label>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {INTERVAL_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setSettings({ ...settings, interval_hours: option.value })
+                        setHasChanges(true)
+                      }}
+                      className={`
+                        rounded-lg px-3 py-2 text-sm transition-colors
+                        ${settings.interval_hours === option.value
+                          ? "bg-black text-white dark:bg-white dark:text-black"
+                          : "bg-gray-50 text-gray-700 hover:bg-gray-100 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20"
+                        }
+                      `}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Backup on new item */}
+              <div className="flex items-center justify-between rounded-lg bg-gray-50 p-4 dark:bg-white/5">
+                <div>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Only backup if new items added</span>
+                  <p className="text-xs text-gray-500 mt-1">Skip backup if no new items since last backup</p>
+                </div>
                 <button
-                  key={option.value}
                   type="button"
                   onClick={() => {
-                    setSettings({ ...settings, interval_hours: option.value })
+                    setSettings({ ...settings, backup_on_new_item: !settings.backup_on_new_item })
                     setHasChanges(true)
                   }}
                   className={`
-                    rounded-lg px-3 py-2 text-sm transition-colors
-                    ${settings.interval_hours === option.value
-                      ? "bg-black text-white dark:bg-white dark:text-black"
-                      : "bg-gray-50 text-gray-700 hover:bg-gray-100 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20"
-                    }
+                    relative h-6 w-11 flex-shrink-0 rounded-full transition-colors
+                    ${settings.backup_on_new_item ? "bg-black dark:bg-white" : "bg-gray-300 dark:bg-gray-600"}
                   `}
                 >
-                  {option.label}
+                  <span
+                    className={`
+                      absolute top-0.5 left-0 h-5 w-5 rounded-full shadow-sm transition-all
+                      ${settings.backup_on_new_item
+                        ? "bg-neutral-900 translate-x-5"
+                        : "bg-white translate-x-1"
+                      }
+                    `}
+                  />
                 </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Backup on new item */}
-          <div className="flex items-center justify-between rounded-lg bg-gray-50 p-4 dark:bg-white/5">
-            <div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Only backup if new items added</span>
-              <p className="text-xs text-gray-500 mt-1">Skip backup if no new items since last backup</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setSettings({ ...settings, backup_on_new_item: !settings.backup_on_new_item })
-                setHasChanges(true)
-              }}
-              className={`
-                relative h-6 w-11 flex-shrink-0 rounded-full transition-colors
-                ${settings.backup_on_new_item ? "bg-black dark:bg-white" : "bg-gray-300 dark:bg-gray-600"}
-              `}
-            >
-              <span
-                className={`
-                  absolute top-0.5 left-0 h-5 w-5 rounded-full shadow-sm transition-all
-                  ${settings.backup_on_new_item
-                    ? "bg-neutral-900 translate-x-5"
-                    : "bg-white translate-x-1"
-                  }
-                `}
-              />
-            </button>
-          </div>
-
-          {/* Local backup toggle */}
-          <div className="flex items-center justify-between rounded-lg bg-gray-50 p-4 dark:bg-white/5">
-            <div>
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                <HardDrive className="mr-1 inline h-4 w-4" />
-                Local Backup
-              </span>
-              <p className="text-xs text-gray-500 mt-1">Save backups to server directory (last 6 kept)</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setSettings({ ...settings, local_backup_enabled: !settings.local_backup_enabled })
-                setHasChanges(true)
-              }}
-              className={`
-                relative h-6 w-11 flex-shrink-0 rounded-full transition-colors
-                ${settings.local_backup_enabled ? "bg-black dark:bg-white" : "bg-gray-300 dark:bg-gray-600"}
-              `}
-            >
-              <span
-                className={`
-                  absolute top-0.5 left-0 h-5 w-5 rounded-full shadow-sm transition-all
-                  ${settings.local_backup_enabled
-                    ? "bg-neutral-900 translate-x-5"
-                    : "bg-white translate-x-1"
-                  }
-                `}
-              />
-            </button>
-          </div>
-
-          {/* Last backup info */}
-          {settingsData && (
-            <div className="rounded-lg bg-gray-50 p-4 dark:bg-white/5">
-              <p className="text-sm text-gray-700 dark:text-gray-300">
-                Last backup: <span className="font-medium">{formatDate(settingsData.last_backup_at)}</span>
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                {settingsData.last_item_count} items backed up
-              </p>
-            </div>
-          )}
-        </div>
-
-        {hasChanges && (
-          <div className="mt-6 flex justify-end gap-2">
-            <button
-              onClick={() => {
-                setSettings(settingsData || {})
-                setHasChanges(false)
-              }}
-              className="btn-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSaveSettings}
-              disabled={updateSettings.isPending}
-              className="btn-primary"
-            >
-              {updateSettings.isPending ? "Saving..." : <><Save className="mr-1 h-4 w-4 inline" /> Save</>}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* S3 Settings */}
-      <div className="card mb-6">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white dark:bg-white dark:text-black">
-            <SettingsIcon className="h-5 w-5" />
-          </div>
-          <div>
-            <h2 className="text-lg font-semibold text-black dark:text-white">S3 Storage</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Configure your S3-compatible storage</p>
-          </div>
-        </div>
-
-        <div className="mb-4 flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable S3 Backup</span>
-          <button
-            type="button"
-            onClick={() => {
-              setSettings({ ...settings, s3_enabled: !settings.s3_enabled })
-              setHasChanges(true)
-            }}
-            className={`
-              relative h-6 w-11 flex-shrink-0 rounded-full transition-colors
-              ${settings.s3_enabled ? "bg-black dark:bg-white" : "bg-gray-300 dark:bg-gray-600"}
-            `}
-          >
-            <span
-              className={`
-                absolute top-0.5 left-0 h-5 w-5 rounded-full shadow-sm transition-all
-                ${settings.s3_enabled
-                  ? "bg-neutral-900 translate-x-5"
-                  : "bg-white translate-x-1"
-                }
-              `}
-            />
-          </button>
-        </div>
-
-        {settings.s3_enabled && (
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="bucket" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Bucket Name
-              </label>
-              <input
-                id="bucket"
-                type="text"
-                value={settings.s3_bucket_name || ""}
-                onChange={(e) => {
-                  setSettings({ ...settings, s3_bucket_name: e.target.value })
-                }}
-                className="input"
-                placeholder="my-backup-bucket"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="access-key" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Access Key
-                </label>
-                <input
-                  id="access-key"
-                  type="text"
-                  value={settings.s3_access_key || ""}
-                  onChange={(e) => {
-                    setSettings({ ...settings, s3_access_key: e.target.value })
-                  }}
-                  className="input"
-                  placeholder="AKIAIOSFODNN7EXAMPLE"
-                />
               </div>
 
-              <div>
-                <label htmlFor="secret-key" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Secret Key
-                </label>
-                <div className="relative">
-                  <input
-                    id="secret-key"
-                    type="password"
-                    value={settings.s3_secret_key === "********" ? "" : settings.s3_secret_key || ""}
-                    onChange={(e) => {
-                      setSettings({ ...settings, s3_secret_key: e.target.value })
-                    }}
-                    className="input pr-10"
-                    placeholder={settingsData?.s3_secret_key ? "Enter new value to change" : "••••••••••••••••"}
-                  />
-                  {settingsData?.s3_secret_key && (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
-                      <span className="text-xs text-gray-400 mr-2">Key set</span>
-                    </div>
-                  )}
+              {/* Local backup toggle */}
+              <div className="flex items-center justify-between rounded-lg bg-gray-50 p-4 dark:bg-white/5">
+                <div>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <HardDrive className="mr-1 inline h-4 w-4" />
+                    Local Backup
+                  </span>
+                  <p className="text-xs text-gray-500 mt-1">Save backups to server directory (last 6 kept)</p>
                 </div>
-                {settingsData?.s3_secret_key && (
-                  <p className="mt-1 text-xs text-gray-500">For security, the existing secret key cannot be viewed. Enter a new value to change it.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSettings({ ...settings, local_backup_enabled: !settings.local_backup_enabled })
+                    setHasChanges(true)
+                  }}
+                  className={`
+                    relative h-6 w-11 flex-shrink-0 rounded-full transition-colors
+                    ${settings.local_backup_enabled ? "bg-black dark:bg-white" : "bg-gray-300 dark:bg-gray-600"}
+                  `}
+                >
+                  <span
+                    className={`
+                      absolute top-0.5 left-0 h-5 w-5 rounded-full shadow-sm transition-all
+                      ${settings.local_backup_enabled
+                        ? "bg-neutral-900 translate-x-5"
+                        : "bg-white translate-x-1"
+                      }
+                    `}
+                  />
+                </button>
+              </div>
+
+              {/* Last backup info */}
+              {settingsData && (
+                <div className="rounded-lg bg-gray-50 p-4 dark:bg-white/5">
+                  <p className="text-sm text-gray-700 dark:text-gray-300">
+                    Last backup: <span className="font-medium">{formatDate(settingsData.last_backup_at)}</span>
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {settingsData.last_item_count} items backed up
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {hasChanges && (
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setSettings(settingsData || {})
+                    setHasChanges(false)
+                  }}
+                  className="btn-secondary"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveSettings}
+                  disabled={updateSettings.isPending}
+                  className="btn-primary"
+                >
+                  {updateSettings.isPending ? "Saving..." : <><Save className="mr-1 h-4 w-4 inline" /> Save</>}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* S3 Settings */}
+          <div className="card mb-6">
+            <div className="mb-6 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white dark:bg-white dark:text-black">
+                <SettingsIcon className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-black dark:text-white">S3 Storage</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Configure your S3-compatible storage</p>
+              </div>
+            </div>
+
+            <div className="mb-4 flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable S3 Backup</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSettings({ ...settings, s3_enabled: !settings.s3_enabled })
+                  setHasChanges(true)
+                }}
+                className={`
+                  relative h-6 w-11 flex-shrink-0 rounded-full transition-colors
+                  ${settings.s3_enabled ? "bg-black dark:bg-white" : "bg-gray-300 dark:bg-gray-600"}
+                `}
+              >
+                <span
+                  className={`
+                    absolute top-0.5 left-0 h-5 w-5 rounded-full shadow-sm transition-all
+                    ${settings.s3_enabled
+                      ? "bg-neutral-900 translate-x-5"
+                      : "bg-white translate-x-1"
+                    }
+                  `}
+                />
+              </button>
+            </div>
+
+            {settings.s3_enabled && (
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="bucket" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Bucket Name
+                  </label>
+                  <input
+                    id="bucket"
+                    type="text"
+                    value={settings.s3_bucket_name || ""}
+                    onChange={(e) => {
+                      setSettings({ ...settings, s3_bucket_name: e.target.value })
+                    }}
+                    className="input"
+                    placeholder="my-backup-bucket"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="access-key" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Access Key
+                    </label>
+                    <input
+                      id="access-key"
+                      type="text"
+                      value={settings.s3_access_key || ""}
+                      onChange={(e) => {
+                        setSettings({ ...settings, s3_access_key: e.target.value })
+                      }}
+                      className="input"
+                      placeholder="AKIAIOSFODNN7EXAMPLE"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="secret-key" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Secret Key
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="secret-key"
+                        type="password"
+                        value={settings.s3_secret_key === "********" ? "" : settings.s3_secret_key || ""}
+                        onChange={(e) => {
+                          setSettings({ ...settings, s3_secret_key: e.target.value })
+                        }}
+                        className="input pr-10"
+                        placeholder={settingsData?.s3_secret_key ? "Enter new value to change" : "••••••••••••••••"}
+                      />
+                      {settingsData?.s3_secret_key && (
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
+                          <span className="text-xs text-gray-400 mr-2">Key set</span>
+                        </div>
+                      )}
+                    </div>
+                    {settingsData?.s3_secret_key && (
+                      <p className="mt-1 text-xs text-gray-500">For security, the existing secret key cannot be viewed. Enter a new value to change it.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="region" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Region
+                    </label>
+                    <input
+                      id="region"
+                      type="text"
+                      value={settings.s3_region || ""}
+                      onChange={(e) => {
+                        setSettings({ ...settings, s3_region: e.target.value })
+                      }}
+                      className="input"
+                      placeholder="us-east-1"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="endpoint" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Endpoint <span className="text-gray-400 font-normal">(optional)</span>
+                    </label>
+                    <input
+                      id="endpoint"
+                      type="text"
+                      value={settings.s3_endpoint || ""}
+                      onChange={(e) => {
+                        setSettings({ ...settings, s3_endpoint: e.target.value })
+                      }}
+                      className="input"
+                      placeholder="https://s3.wasabisys.com"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={handleTestConnection}
+                    disabled={testS3.isPending}
+                    className="btn-secondary w-full"
+                  >
+                    {testS3.isPending ? "Testing..." : <><TestTube className="mr-1 h-4 w-4 inline" /> Test Connection</>}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveS3Settings}
+                    disabled={updateSettings.isPending}
+                    className="btn-primary w-full"
+                  >
+                    {updateSettings.isPending ? "Saving..." : <><Save className="mr-1 h-4 w-4 inline" /> Save S3 Settings</>}
+                  </button>
+                </div>
+
+                {testS3.data && (
+                  <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+                    <Check className="mr-1 inline h-4 w-4" />
+                    {testS3.data.data.message}
+                  </div>
+                )}
+
+                {testS3.error && (
+                  <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+                    <X className="mr-1 inline h-4 w-4" />
+                    Connection failed. Please check your settings.
+                  </div>
                 )}
               </div>
-            </div>
+            )}
+          </div>
 
-            <div className="grid grid-cols-2 gap-4">
+          {/* Manual Backup */}
+          <div className="card mb-6">
+            <div className="flex items-center justify-between">
               <div>
-                <label htmlFor="region" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Region
-                </label>
-                <input
-                  id="region"
-                  type="text"
-                  value={settings.s3_region || ""}
-                  onChange={(e) => {
-                    setSettings({ ...settings, s3_region: e.target.value })
-                  }}
-                  className="input"
-                  placeholder="us-east-1"
-                />
+                <h2 className="text-lg font-semibold text-black dark:text-white">Manual Backup</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Trigger a backup immediately</p>
               </div>
-
-              <div>
-                <label htmlFor="endpoint" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Endpoint <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <input
-                  id="endpoint"
-                  type="text"
-                  value={settings.s3_endpoint || ""}
-                  onChange={(e) => {
-                    setSettings({ ...settings, s3_endpoint: e.target.value })
-                  }}
-                  className="input"
-                  placeholder="https://s3.wasabisys.com"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
               <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={testS3.isPending}
-                className="btn-secondary w-full"
+                onClick={() => manualBackup.mutate()}
+                disabled={manualBackup.isPending || (!settings.local_backup_enabled && !settings.s3_enabled)}
+                className="btn-primary"
               >
-                {testS3.isPending ? "Testing..." : <><TestTube className="mr-1 h-4 w-4 inline" /> Test Connection</>}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSaveS3Settings}
-                disabled={updateSettings.isPending}
-                className="btn-primary w-full"
-              >
-                {updateSettings.isPending ? "Saving..." : <><Save className="mr-1 h-4 w-4 inline" /> Save S3 Settings</>}
+                {manualBackup.isPending ? "Backing up..." : "Backup Now"}
               </button>
             </div>
 
-            {testS3.data && (
-              <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+            {manualBackup.data && (
+              <div className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
                 <Check className="mr-1 inline h-4 w-4" />
-                {testS3.data.data.message}
+                {manualBackup.data.data.message}
               </div>
             )}
 
-            {testS3.error && (
-              <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+            {manualBackup.error && (
+              <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
                 <X className="mr-1 inline h-4 w-4" />
-                Connection failed. Please check your settings.
+                Backup failed. Please check your settings.
               </div>
             )}
           </div>
-        )}
-      </div>
 
-      {/* Manual Backup */}
-      <div className="card mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-black dark:text-white">Manual Backup</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Trigger a backup immediately</p>
-          </div>
-          <button
-            onClick={() => manualBackup.mutate()}
-            disabled={manualBackup.isPending || (!settings.local_backup_enabled && !settings.s3_enabled)}
-            className="btn-primary"
-          >
-            {manualBackup.isPending ? "Backing up..." : "Backup Now"}
-          </button>
-        </div>
-
-        {manualBackup.data && (
-          <div className="mt-4 rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
-            <Check className="mr-1 inline h-4 w-4" />
-            {manualBackup.data.data.message}
-          </div>
-        )}
-
-        {manualBackup.error && (
-          <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
-            <X className="mr-1 inline h-4 w-4" />
-            Backup failed. Please check your settings.
-          </div>
-        )}
-      </div>
-
-      {/* Backup Logs */}
-      {logsData && logsData.length > 0 && (
-        <div className="card">
-          <h2 className="mb-4 text-lg font-semibold text-black dark:text-white">Backup History</h2>
-          <div className="space-y-2">
-            {logsData.map((log) => (
-              <div
-                key={log.id}
-                className="flex items-center justify-between rounded-lg bg-gray-50 p-3 dark:bg-white/5"
-              >
-                <div className="flex items-center gap-2">
-                  {log.status === "success" && <Check className="h-4 w-4 text-green-600" />}
-                  {log.status === "failed" && <X className="h-4 w-4 text-red-600" />}
-                  {log.status === "skipped" && <Clock className="h-4 w-4 text-gray-600" />}
-                  <span className="text-sm text-gray-700 dark:text-gray-300">{log.message}</span>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-500">
-                    {log.items_backed_up} items • {log.files_backed_up} files
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    {new Date(log.created_at).toLocaleString()}
-                  </p>
-                </div>
+          {/* Backup Logs */}
+          {logsData && logsData.length > 0 && (
+            <div className="card">
+              <h2 className="mb-4 text-lg font-semibold text-black dark:text-white">Backup History</h2>
+              <div className="space-y-2">
+                {logsData.map((log) => (
+                  <div
+                    key={log.id}
+                    className="flex items-center justify-between rounded-lg bg-gray-50 p-3 dark:bg-white/5"
+                  >
+                    <div className="flex items-center gap-2">
+                      {log.status === "success" && <Check className="h-4 w-4 text-green-600" />}
+                      {log.status === "failed" && <X className="h-4 w-4 text-red-600" />}
+                      {log.status === "skipped" && <Clock className="h-4 w-4 text-gray-600" />}
+                      <span className="text-sm text-gray-700 dark:text-gray-300">{log.message}</span>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">
+                        {log.items_backed_up} items • {log.files_backed_up} files
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {new Date(log.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

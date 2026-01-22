@@ -16,6 +16,12 @@ class RegisterView(APIView):
     permission_classes = []
 
     def post(self, request: Request) -> Response:
+        # Check if signup is allowed
+        if not getattr(settings, "ALLOW_SIGNUP", True):
+            return Response(
+                {"error": {"code": "SIGNUP_DISABLED", "message": "This is a private server. Registration is disabled."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         email = request.data.get("email", "").strip().lower()
         username = request.data.get("username", "").strip()
         password = request.data.get("password", "")
@@ -113,6 +119,8 @@ class MeView(APIView):
                         "username": request.user.username,
                         "email": request.user.email,
                         "email_verified": request.user.email_verified,
+                        "is_staff": request.user.is_staff,
+                        "is_superuser": request.user.is_superuser,
                     }
                 }
             }

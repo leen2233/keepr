@@ -4,10 +4,12 @@ import subprocess
 import shutil
 import tempfile
 import zipfile
+import json
 from datetime import datetime
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -18,6 +20,7 @@ from botocore.exceptions import ClientError
 
 from .models import BackupSettings, BackupLog
 from apps.items.models import Item
+from apps.items.models import Tag
 
 
 class BackupSettingsSerializer(serializers.ModelSerializer):
@@ -52,11 +55,23 @@ class BackupLogSerializer(serializers.ModelSerializer):
 
 class BackupSettingsView(APIView):
     def get(self, request: Request) -> Response:
+        # Only staff can view backup settings
+        if not request.user.is_staff:
+            return Response(
+                {"error": {"code": "PERMISSION_DENIED", "message": "Backup settings are managed by administrators only."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         settings_obj, _ = BackupSettings.objects.get_or_create(user=request.user)
         serializer = BackupSettingsSerializer(settings_obj)
         return Response({"data": {"settings": serializer.data}})
 
     def put(self, request: Request) -> Response:
+        # Only staff can modify backup settings
+        if not request.user.is_staff:
+            return Response(
+                {"error": {"code": "PERMISSION_DENIED", "message": "Backup settings are managed by administrators only."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         settings_obj, _ = BackupSettings.objects.get_or_create(user=request.user)
 
         data = request.data
@@ -82,6 +97,12 @@ class BackupSettingsView(APIView):
 
 class BackupLogsView(APIView):
     def get(self, request: Request) -> Response:
+        # Only staff can view backup logs
+        if not request.user.is_staff:
+            return Response(
+                {"error": {"code": "PERMISSION_DENIED", "message": "Backup logs are managed by administrators only."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         logs = request.user.backup_logs.all()[:20]
         serializer = BackupLogSerializer(logs, many=True)
         return Response({"data": {"logs": serializer.data}})
@@ -89,6 +110,12 @@ class BackupLogsView(APIView):
 
 class ManualBackupView(APIView):
     def post(self, request: Request) -> Response:
+        # Only staff can trigger manual backup
+        if not request.user.is_staff:
+            return Response(
+                {"error": {"code": "PERMISSION_DENIED", "message": "Manual backup is managed by administrators only."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         settings_obj, _ = BackupSettings.objects.get_or_create(user=request.user)
 
         # Check if at least one backup option is enabled
@@ -123,9 +150,19 @@ class ManualBackupView(APIView):
 
     def _perform_backup(self, user, settings_obj):
         from apps.items.models import Item
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+
+        # Determine if this is a full (admin) backup or single-user backup
+        is_full_backup = user.is_staff or user.is_superuser
 
         # Check if backup is needed
-        item_count = Item.objects.filter(user=user).count()
+        if is_full_backup:
+            item_count = Item.objects.count()
+        else:
+            item_count = Item.objects.filter(user=user).count()
+
         if settings_obj.backup_on_new_item and item_count <= settings_obj.last_item_count:
             BackupLog.objects.create(
                 user=user,
@@ -170,19 +207,30 @@ class ManualBackupView(APIView):
                         zipf.write(db_path, "database.sqlite3")
 
                 # Get item count for logging
-                items_count = Item.objects.filter(user=user).count()
+                items_count = item_count
 
                 # Backup uploaded files
                 media_root = settings.MEDIA_ROOT
-                user_media_dir = os.path.join(media_root, str(user.id))
 
-                if os.path.exists(user_media_dir):
-                    for root, dirs, files in os.walk(user_media_dir):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            arcname = os.path.join("media", str(user.id), os.path.relpath(file_path, user_media_dir))
-                            zipf.write(file_path, arcname)
-                            files_count += 1
+                if is_full_backup:
+                    # Admin backup: backup all users' media files
+                    if os.path.exists(media_root):
+                        for root, dirs, files in os.walk(media_root):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                arcname = os.path.join("media", os.path.relpath(file_path, media_root))
+                                zipf.write(file_path, arcname)
+                                files_count += 1
+                else:
+                    # Regular user backup: only backup own files
+                    user_media_dir = os.path.join(media_root, str(user.id))
+                    if os.path.exists(user_media_dir):
+                        for root, dirs, files in os.walk(user_media_dir):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                arcname = os.path.join("media", str(user.id), os.path.relpath(file_path, user_media_dir))
+                                zipf.write(file_path, arcname)
+                                files_count += 1
 
             # Perform backups
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -193,15 +241,17 @@ class ManualBackupView(APIView):
                 local_backup_dir = getattr(settings, "LOCAL_BACKUP_DIR", None)
                 if local_backup_dir:
                     os.makedirs(local_backup_dir, exist_ok=True)
-                    local_backup_path = os.path.join(local_backup_dir, f"backup_{user.id}_{timestamp}.zip")
+                    backup_prefix = "full_backup" if is_full_backup else str(user.id)
+                    local_backup_path = os.path.join(local_backup_dir, f"backup_{backup_prefix}_{timestamp}.zip")
                     shutil.copy2(backup_path, local_backup_path)
                     backup_locations.append("local")
                     # Clean up old local backups (keep last 6)
-                    self._cleanup_old_local_backups(local_backup_dir, user.id)
+                    self._cleanup_old_local_backups(local_backup_dir, backup_prefix)
 
             # S3 backup
             if settings_obj.s3_enabled:
-                s3_key = f"keepr_backups/{user.id}/backup_{timestamp}.zip"
+                s3_prefix = "full_backups" if is_full_backup else str(user.id)
+                s3_key = f"keepr_backups/{s3_prefix}/backup_{timestamp}.zip"
                 self._upload_to_s3(settings_obj, backup_path, s3_key)
                 backup_locations.append("S3")
 
@@ -212,20 +262,22 @@ class ManualBackupView(APIView):
 
             # Create log with location info
             location_str = " and ".join(backup_locations)
+            backup_type = "Full" if is_full_backup else "Personal"
             BackupLog.objects.create(
                 user=user,
                 status="success",
-                message=f"Backup completed successfully ({location_str})",
+                message=f"{backup_type} backup completed successfully ({location_str})",
                 items_backed_up=items_count,
                 files_backed_up=files_count,
             )
 
             return {
                 "status": "success",
-                "message": f"Backup completed successfully ({location_str})",
+                "message": f"{backup_type} backup completed successfully ({location_str})",
                 "items_backed_up": items_count,
                 "files_backed_up": files_count,
                 "backup_locations": backup_locations,
+                "backup_type": "full" if is_full_backup else "personal",
             }
 
         finally:
@@ -233,9 +285,9 @@ class ManualBackupView(APIView):
             if os.path.exists(backup_path):
                 os.remove(backup_path)
 
-    def _cleanup_old_local_backups(self, backup_dir, user_id, keep_count=6):
+    def _cleanup_old_local_backups(self, backup_dir, backup_prefix, keep_count=6):
         """Keep only the last N backups, delete oldest ones."""
-        pattern = os.path.join(backup_dir, f"backup_{user_id}_*.zip")
+        pattern = os.path.join(backup_dir, f"backup_{backup_prefix}_*.zip")
         backup_files = glob.glob(pattern) if glob else []
 
         if len(backup_files) <= keep_count:
@@ -269,6 +321,12 @@ class ManualBackupView(APIView):
 
 class TestS3ConnectionView(APIView):
     def post(self, request: Request) -> Response:
+        # Only staff can test S3 connection
+        if not request.user.is_staff:
+            return Response(
+                {"error": {"code": "PERMISSION_DENIED", "message": "S3 connection testing is managed by administrators only."}},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         # Use provided credentials from request body, or fall back to saved settings
         bucket_name = request.data.get("s3_bucket_name")
         access_key = request.data.get("s3_access_key")
@@ -320,3 +378,102 @@ class TestS3ConnectionView(APIView):
                 {"error": {"code": "S3_CONNECTION_FAILED", "message": str(e)}},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class ExportDataView(APIView):
+    """
+    Export user's own data as a downloadable ZIP file.
+    Includes user's items, tags, and associated media files.
+    """
+
+    def post(self, request: Request) -> HttpResponse:
+        user = request.user
+
+        # Create temporary file for the ZIP
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_file:
+            zip_path = tmp_file.name
+
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+                # Export user's items as JSON
+                items = Item.objects.filter(user=user)
+                items_data = []
+                for item in items:
+                    # Get tags through ItemTag relationship
+                    item_tags = [
+                        {"id": str(item_tag.tag.id), "name": item_tag.tag.name, "color": item_tag.tag.color}
+                        for item_tag in item.item_tags.all()
+                    ]
+                    item_data = {
+                        "id": str(item.id),
+                        "type": item.type,
+                        "title": item.title or "",
+                        "content": item.content or "",
+                        "file_name": item.file_name or "",
+                        "file_size": item.file_size or 0,
+                        "file_mimetype": item.file_mimetype or "",
+                        "created_at": item.created_at.isoformat(),
+                        "updated_at": item.updated_at.isoformat(),
+                        "tags": item_tags,
+                    }
+                    items_data.append(item_data)
+
+                zipf.writestr("items.json", json.dumps(items_data, indent=2))
+
+                # Export user's tags as JSON
+                tags = Tag.objects.filter(user=user)
+                tags_data = [
+                    {
+                        "id": str(tag.id),
+                        "name": tag.name,
+                        "color": tag.color,
+                    }
+                    for tag in tags
+                ]
+                zipf.writestr("tags.json", json.dumps(tags_data, indent=2))
+
+                # Export user's media files
+                media_root = settings.MEDIA_ROOT
+                user_media_dir = os.path.join(media_root, str(user.id))
+
+                if os.path.exists(user_media_dir):
+                    for root, dirs, files in os.walk(user_media_dir):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.join("media", os.path.relpath(file_path, media_root))
+                            zipf.write(file_path, arcname)
+
+                # Export user metadata
+                user_metadata = {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "email": user.email,
+                    "exported_at": timezone.now().isoformat(),
+                    "items_count": items.count(),
+                    "tags_count": tags.count(),
+                }
+                zipf.writestr("metadata.json", json.dumps(user_metadata, indent=2))
+
+            # Read the ZIP file and return as downloadable response
+            with open(zip_path, "rb") as f:
+                zip_data = f.read()
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            response = HttpResponse(
+                zip_data,
+                content_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="keepr_export_{user.username}_{timestamp}.zip"'
+                },
+            )
+            return response
+
+        except Exception as e:
+            return Response(
+                {"error": {"code": "EXPORT_FAILED", "message": str(e)}},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        finally:
+            # Clean up temp file
+            if os.path.exists(zip_path):
+                os.remove(zip_path)

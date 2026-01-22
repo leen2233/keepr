@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useLogin, useRegister } from "@/hooks/use-auth"
 import { useAuthStore } from "@/store"
-import { Mail, User, Lock, ArrowRight } from "lucide-react"
+import { Mail, User, Lock, ArrowRight, AlertCircle } from "lucide-react"
 
 export function LoginPage() {
   const [isLogin, setIsLogin] = useState(true)
@@ -10,6 +10,7 @@ export function LoginPage() {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  const [signupDisabled, setSignupDisabled] = useState(false)
 
   const navigate = useNavigate()
   const login = useLogin()
@@ -19,6 +20,7 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setSignupDisabled(false)
 
     try {
       if (isLogin) {
@@ -37,9 +39,24 @@ export function LoginPage() {
         setError("Registration successful. Please check your email to verify.")
       }
     } catch (err: any) {
+      const errorCode = err.response?.data?.error?.code
       const message = err.response?.data?.error?.message || "An error occurred"
-      setError(message)
+
+      if (errorCode === "SIGNUP_DISABLED") {
+        setError(message)
+        setSignupDisabled(true)
+        // Switch back to login view
+        setIsLogin(true)
+      } else {
+        setError(message)
+      }
     }
+  }
+
+  const handleToggleMode = () => {
+    setIsLogin(!isLogin)
+    setError("")
+    setSignupDisabled(false)
   }
 
   return (
@@ -52,6 +69,15 @@ export function LoginPage() {
           <p className="mb-6 text-sm text-gray-600 dark:text-gray-400">
             {isLogin ? "to access your archive" : "to get started"}
           </p>
+
+          {signupDisabled && (
+            <div className="mb-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-400">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <p>This is a private server. Registration is disabled.</p>
+              </div>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {!isLogin && (
@@ -108,7 +134,7 @@ export function LoginPage() {
               </div>
             </div>
 
-            {error && (
+            {error && !signupDisabled && (
               <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
                 {error}
               </div>
@@ -132,10 +158,7 @@ export function LoginPage() {
             {isLogin ? "Don't have an account? " : "Already have an account? "}
             <button
               type="button"
-              onClick={() => {
-                setIsLogin(!isLogin)
-                setError("")
-              }}
+              onClick={handleToggleMode}
               className="font-medium text-black dark:text-white hover:underline"
             >
               {isLogin ? "Sign up" : "Sign in"}
