@@ -6,6 +6,53 @@
 ## Current Focus
 Testing the application and fixing bugs as they arise. The UI has been redesigned to match cobalt.tools aesthetic - clean, minimal, with excellent light/dark mode support.
 
+## Recent Changes & Fixes (2026-01-23)
+
+### Permission Management
+- Backup settings (S3, local, scheduling) now restricted to staff/superuser only
+- Non-staff users see "Admin Access Required" message in Settings
+- Added `is_staff` and `is_superuser` fields to User type and API responses (MeView, LoginView)
+
+### Signup Control
+- Added `ALLOW_SIGNUP` environment variable (defaults to `true`)
+- When disabled, registration returns `SIGNUP_DISABLED` error with "This is a private server. Registration is disabled."
+- Signup link remains visible but shows amber warning banner when clicked
+
+### User Data Export
+- New `ExportDataView` at `/api/export/data/` - all authenticated users can use
+- Exports user's own data as downloadable ZIP (not stored on server)
+- Export includes: items.json (with tags), tags.json, metadata.json, and user's media files
+- Added "Export My Data" section to Settings page (visible to all users)
+
+### Admin Full Backup
+- Staff/superuser backups now include ALL users' items and media files
+- Non-staff backups only include own data (personal backup)
+- Different naming: `backup_full_backup_*.zip` vs `backup_{user_id}_*.zip`
+- Different S3 paths: `keepr_backups/full_backups/` vs `keepr_backups/{user_id}/`
+- Log messages indicate "Full backup" vs "Personal backup"
+
+### Password Change Feature
+- New `ChangePasswordView` at `/api/auth/change-password/`
+- Requires: current password, new password (min 8 chars), confirm password
+- Frontend validation for matching passwords and minimum length
+- Uses `update_session_auth_hash` to keep user logged in after change
+- Added "Change Password" section to Settings page with KeyRound icon
+
+### Login Improvements
+- Backend already supported username OR email login (query logic checks both)
+- Updated frontend label from "Email" to "Email or Username"
+- Changed input type from `email` to `text` for username compatibility
+- LoginView now returns `is_staff` and `is_superuser` in response
+
+### Bug Fixes
+- **Export fix**: Changed `item.tags.all()` to `item.item_tags.all()` (correct relationship)
+- **Export fix**: Removed `created_at` from tag export (Tag model doesn't have this field)
+- **Login redirect fix**: API interceptor now checks if already on `/login` before redirecting on 401
+- **Password logout fix**: Added `update_session_auth_hash` to preserve session after password change
+
+### Environment Variables Added
+- `ALLOW_SIGNUP` - Enable/disable user registration (default: `true`)
+
 ## Recent Changes & Fixes (2026-01-22)
 
 ### Button Styling Fixes
@@ -158,3 +205,7 @@ Django REST Framework with:
 - **CSRF exemption**: Use `@method_decorator(csrf_exempt, name='dispatch')` + manual auth check
 - **Backup**: S3 backups use boto3, ZIP format with database dump + items JSON + media files
 - **Toggle switches**: Always use `overflow-hidden` on container, calculate `translate-x` based on width (ON: `calc(2.75rem-1.25rem-0.125rem)`, OFF: `translate-x-0.5`)
+- **Item-Tag relationship**: Access via `item.item_tags.all()`, then `item_tag.tag` (not `item.tags`)
+- **Permission checks**: Use `request.user.is_staff or request.user.is_superuser` for admin-only features
+- **Session preservation**: Use `update_session_auth_hash(request, request.user)` after password change
+- **API interceptor guard**: Check `!window.location.pathname.startsWith("/login")` before redirecting on 401

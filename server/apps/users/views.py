@@ -97,6 +97,8 @@ class LoginView(APIView):
                         "username": user.username,
                         "email": user.email,
                         "email_verified": user.email_verified,
+                        "is_staff": user.is_staff,
+                        "is_superuser": user.is_superuser,
                     }
                 }
             }
@@ -160,4 +162,42 @@ class VerifyEmailView(APIView):
 
         return Response(
             {"data": {"message": "Email verified successfully"}}
+        )
+
+
+class ChangePasswordView(APIView):
+    def post(self, request: Request) -> Response:
+        from django.contrib.auth import update_session_auth_hash
+
+        current_password = request.data.get("current_password", "")
+        new_password = request.data.get("new_password", "")
+
+        if not current_password or not new_password:
+            return Response(
+                {"error": {"code": "MISSING_FIELDS", "message": "Current password and new password are required"}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {"error": {"code": "PASSWORD_TOO_SHORT", "message": "New password must be at least 8 characters"}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verify current password
+        if not request.user.check_password(current_password):
+            return Response(
+                {"error": {"code": "INVALID_PASSWORD", "message": "Current password is incorrect"}},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Change password
+        request.user.set_password(new_password)
+        request.user.save()
+
+        # Update session to keep user logged in
+        update_session_auth_hash(request, request.user)
+
+        return Response(
+            {"data": {"message": "Password changed successfully"}}
         )

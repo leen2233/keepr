@@ -50,6 +50,8 @@ export function LoginPage() {
       } else {
         setError(message)
       }
+      // Prevent any form submission or navigation
+      return
     }
   }
 
@@ -101,16 +103,17 @@ export function LoginPage() {
 
             <div>
               <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Email
+                Email or Username
               </label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <input
                   id="email"
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="input pl-10"
+                  placeholder="Enter your email or username"
                   required
                 />
               </div>

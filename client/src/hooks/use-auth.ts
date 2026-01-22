@@ -51,3 +51,12 @@ export function useLogout() {
     },
   })
 }
+
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: async (data: { current_password: string; new_password: string }) => {
+      const response = await api.post<MessageResponse>("/auth/change-password/", data)
+      return response.data.data.message
+    },
+  })
+}

@@ -36,6 +36,18 @@
 - [x] **Visible borders (border-black/20, border-black/30)**
 - [x] **Removed description field from items**
 
+## Bug Fixes Completed (2026-01-23)
+
+### Permission & Export Features
+- [x] Permission management: Backup settings only accessible to staff/superuser
+- [x] Signup toggle: `ALLOW_SIGNUP` environment variable to control user registration
+- [x] User data export: All users can export their own data (items, tags, media) as ZIP
+- [x] Admin full backup: Staff backup now includes ALL users' data (not just own)
+- [x] Password change: Users can change password from Settings page
+- [x] Login UX: Updated label to "Email or Username", input type to "text"
+- [x] Fixed password change logout issue with `update_session_auth_hash`
+- [x] Fixed login page redirect on invalid credentials (API interceptor check)
+
 ## Bug Fixes Completed (2026-01-22)
 
 ### Button Styling
@@ -110,6 +122,12 @@
 - [x] Local backup option (server filesystem, keeps last 6 backups)
 - [x] Secret key security (never returned in API, only enter new value to change)
 - [x] Toggle switch positioning fix (overflow-hidden, correct translate calculation)
+- [x] Permission management (backup settings staff-only)
+- [x] Signup toggle (ALLOW_SIGNUP env variable)
+- [x] User data export (personal data download)
+- [x] Admin full backup (all users' data)
+- [x] Password change feature
+- [x] Login with username OR email
 
 ### Phase 5: Launch Prep
 - [ ] Run migrations and create database
@@ -134,6 +152,53 @@
 None currently - all reported issues have been resolved
 
 ## Evolution of Decisions
+
+### 2026-01-23 (Permission Management & User Features)
+**Permission Management:**
+- Backup settings (S3/local, scheduling) now restricted to staff/superuser only
+- Non-staff users see "Admin Access Required" message in Settings
+- Added `is_staff` and `is_superuser` to User type and API responses
+
+**Signup Control:**
+- Added `ALLOW_SIGNUP` environment variable (defaults to `true`)
+- When disabled, registration returns `SIGNUP_DISABLED` error with "This is a private server" message
+- Signup link remains visible but shows error when clicked
+
+**User Data Export:**
+- New `ExportDataView` at `/api/export/data/`
+- All users can export their own data as downloadable ZIP
+- Export includes: items.json, tags.json, metadata.json, and user's media files
+- Direct download via browser (no server storage)
+
+**Admin Full Backup:**
+- Staff/superuser backups now include ALL users' data
+- Personal backups (non-staff) only include own data
+- Backup naming: `backup_full_backup_*.zip` vs `backup_{user_id}_*.zip`
+- S3 path: `keepr_backups/full_backups/` vs `keepr_backups/{user_id}/`
+
+**Password Change:**
+- New `ChangePasswordView` at `/api/auth/change-password/`
+- Requires current password, new password (min 8 chars), confirm password
+- Uses `update_session_auth_hash` to keep user logged in after change
+- Added "Change Password" section to Settings page
+
+**Login Improvements:**
+- Login already supported username OR email (backend query logic)
+- Updated frontend label to "Email or Username"
+- Changed input type from `email` to `text` for username compatibility
+- Added `is_staff` and `is_superuser` to LoginView response
+
+**Bug Fixes:**
+- Fixed ExportDataView to use `item.item_tags.all()` instead of `item.tags.all()`
+- Removed `created_at` from tag export (Tag model doesn't have this field)
+- Fixed login page redirect on 401 errors (API interceptor now checks current path)
+- Fixed password change logout issue with `update_session_auth_hash`
+
+**Key Patterns:**
+- Item-Tag relationship: Access via `item.item_tags.all()`, then `item_tag.tag`
+- Permission check: `request.user.is_staff or request.user.is_superuser`
+- Session preservation: Use `update_session_auth_hash(request, request.user)` after password change
+- API interceptor guard: Check `!window.location.pathname.startsWith("/login")` before redirect
 
 ### 2026-01-22 (Local Backup & Security Improvements)
 **Local Backup Feature:**

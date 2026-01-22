@@ -33,6 +33,12 @@
 - File paths stored in database
 - Future: Migrate to S3-compatible storage for easier scaling
 
+### Backup Storage
+- **Local backup**: Server filesystem (configured via `LOCAL_BACKUP_DIR`)
+- **S3 backup**: Any S3-compatible storage (AWS, Wasabi, Backblaze, MinIO)
+- Uses boto3 library for S3 integration
+- Admin backups include all users' data, regular users only get own data
+
 ## Development Setup
 
 ### Prerequisites
@@ -78,6 +84,15 @@ GMAIL_EMAIL=...
 GMAIL_APP_PASSWORD=...
 ALLOWED_HOSTS=localhost,127.0.0.1
 CORS_ALLOWED_ORIGINS=http://localhost:5173
+ALLOW_SIGNUP=true  # Enable/disable user registration
+LOCAL_BACKUP_DIR=/path/to/backups  # Optional: local backup directory
+
+# S3 Backup (optional, for backup feature)
+S3_BUCKET_NAME=...
+S3_ACCESS_KEY=...
+S3_SECRET_KEY=...
+S3_REGION=us-east-1
+S3_ENDPOINT=https://s3.wasabisys.com  # Optional: for S3-compatible services
 
 # client/.env
 VITE_API_URL=http://localhost:8000/api
@@ -120,6 +135,7 @@ npm run build
 - **CORS**: django-cors-headers
 - **File validation**: Custom validators
 - **Search**: PostgreSQL full-text search via Django ORM
+- **Backup**: boto3 for S3-compatible storage
 
 ### Frontend State Management (DECIDED)
 React Context + hooks (simple, built-in)

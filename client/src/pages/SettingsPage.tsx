@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useMe } from "@/hooks/use-auth"
+import { useMe, useChangePassword } from "@/hooks/use-auth"
 import api from "@/lib/api"
-import { ArrowLeft, Settings as SettingsIcon, Cloud, TestTube, Save, Check, X, Clock, HardDrive, Download, Lock } from "lucide-react"
+import { ArrowLeft, Settings as SettingsIcon, Cloud, TestTube, Save, Check, X, Clock, HardDrive, Download, Lock, KeyRound } from "lucide-react"
 
 interface BackupSettings {
   interval_hours: number
@@ -117,7 +117,17 @@ export function SettingsPage() {
     },
   })
 
+  // Change password mutation
+  const changePassword = useChangePassword()
+
   const [settings, setSettings] = useState<Partial<BackupSettings>>({})
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: "",
+  })
+  const [passwordError, setPasswordError] = useState("")
+  const [passwordSuccess, setPasswordSuccess] = useState(false)
 
   useEffect(() => {
     if (settingsData) {
@@ -139,6 +149,41 @@ export function SettingsPage() {
 
   const handleExportData = () => {
     exportData.mutate()
+  }
+
+  const handleChangePassword = () => {
+    setPasswordError("")
+    setPasswordSuccess(false)
+
+    if (passwordForm.new_password.length < 8) {
+      setPasswordError("New password must be at least 8 characters")
+      return
+    }
+
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      setPasswordError("New passwords do not match")
+      return
+    }
+
+    changePassword.mutate(
+      {
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      },
+      {
+        onSuccess: () => {
+          setPasswordSuccess(true)
+          setPasswordForm({
+            current_password: "",
+            new_password: "",
+            confirm_password: "",
+          })
+        },
+        onError: (err: any) => {
+          setPasswordError(err.response?.data?.error?.message || "Failed to change password")
+        },
+      }
+    )
   }
 
   const formatDate = (dateStr: string | null) => {
@@ -194,6 +239,87 @@ export function SettingsPage() {
                 Export failed. Please try again.
               </div>
             )}
+          </div>
+
+          {/* Change Password Section */}
+          <div className="card mb-6">
+            <div className="mb-6 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white dark:bg-white dark:text-black">
+                <KeyRound className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-black dark:text-white">Change Password</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Update your account password</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="current-password-alt" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Current Password
+                </label>
+                <input
+                  id="current-password-alt"
+                  type="password"
+                  value={passwordForm.current_password}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
+                  className="input"
+                  placeholder="Enter your current password"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="new-password-alt" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  New Password
+                </label>
+                <input
+                  id="new-password-alt"
+                  type="password"
+                  value={passwordForm.new_password}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
+                  className="input"
+                  placeholder="Enter new password (min. 8 characters)"
+                  minLength={8}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="confirm-password-alt" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Confirm New Password
+                </label>
+                <input
+                  id="confirm-password-alt"
+                  type="password"
+                  value={passwordForm.confirm_password}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
+                  className="input"
+                  placeholder="Confirm new password"
+                  minLength={8}
+                />
+              </div>
+
+              {passwordError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+                  <X className="mr-1 inline h-4 w-4" />
+                  {passwordError}
+                </div>
+              )}
+
+              {passwordSuccess && (
+                <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+                  <Check className="mr-1 inline h-4 w-4" />
+                  Password changed successfully!
+                </div>
+              )}
+
+              <button
+                onClick={handleChangePassword}
+                disabled={changePassword.isPending || !passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password}
+                className="btn-primary w-full"
+              >
+                {changePassword.isPending ? "Changing..." : "Change Password"}
+              </button>
+            </div>
           </div>
 
           {/* Backup Settings - Permission Denied */}
@@ -271,6 +397,87 @@ export function SettingsPage() {
             Export failed. Please try again.
           </div>
         )}
+      </div>
+
+      {/* Change Password Section */}
+      <div className="card mb-6">
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-black text-white dark:bg-white dark:text-black">
+            <KeyRound className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-black dark:text-white">Change Password</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">Update your account password</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="current-password" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Current Password
+            </label>
+            <input
+              id="current-password"
+              type="password"
+              value={passwordForm.current_password}
+              onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
+              className="input"
+              placeholder="Enter your current password"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="new-password" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              New Password
+            </label>
+            <input
+              id="new-password"
+              type="password"
+              value={passwordForm.new_password}
+              onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
+              className="input"
+              placeholder="Enter new password (min. 8 characters)"
+              minLength={8}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="confirm-password" className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Confirm New Password
+            </label>
+            <input
+              id="confirm-password"
+              type="password"
+              value={passwordForm.confirm_password}
+              onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
+              className="input"
+              placeholder="Confirm new password"
+              minLength={8}
+            />
+          </div>
+
+          {passwordError && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-900/20 dark:text-red-400">
+              <X className="mr-1 inline h-4 w-4" />
+              {passwordError}
+            </div>
+          )}
+
+          {passwordSuccess && (
+            <div className="rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-900/20 dark:text-green-400">
+              <Check className="mr-1 inline h-4 w-4" />
+              Password changed successfully!
+            </div>
+          )}
+
+          <button
+            onClick={handleChangePassword}
+            disabled={changePassword.isPending || !passwordForm.current_password || !passwordForm.new_password || !passwordForm.confirm_password}
+            className="btn-primary w-full"
+          >
+            {changePassword.isPending ? "Changing..." : "Change Password"}
+          </button>
+        </div>
       </div>
 
       {/* Backup Settings - Staff Only */}
