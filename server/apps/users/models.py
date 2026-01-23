@@ -9,6 +9,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     username = models.CharField(unique=True, max_length=150)
     email_verified = models.BooleanField(default=False)
+    create_shortcut = models.CharField(max_length=50, blank=True, null=True, default="n", help_text="Keyboard shortcut for creating new items (e.g., 'n', 'ctrl+n', 'shift+enter')")
 
     EMAIL_FIELD = "email"
     REQUIRED_FIELDS = ["email"]

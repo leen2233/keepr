@@ -167,6 +167,7 @@ Login → Email/username + password → Session token → Access
 POST   /api/auth/register
 POST   /api/auth/login
 GET    /api/auth/verify/:token
+POST   /api/auth/change-password
 
 GET    /api/items
 POST   /api/items
@@ -184,6 +185,9 @@ PUT    /api/backup/settings
 GET    /api/backup/logs
 POST   /api/backup/manual
 POST   /api/backup/test-s3
+
+POST   /api/export/data       # All users - export personal data
+POST   /api/import/data       # All users - personal import; staff only - full import
 ```
 
 ### Response Format

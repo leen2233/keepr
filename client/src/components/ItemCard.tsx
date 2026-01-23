@@ -2,7 +2,7 @@ import { Link } from "react-router-dom"
 import { formatBytes, formatDate } from "@/lib/utils"
 import { TagBadge } from "./TagBadge"
 import type { Item } from "@/lib/types"
-import { FileText, Key, Image, Video, File, ArrowRight } from "lucide-react"
+import { FileText, Key, Image, Video, File, ArrowRight, Pin, PinOff } from "lucide-react"
 
 const ITEM_TYPE_ICONS: Record<string, React.ReactNode> = {
   text: <FileText className="h-5 w-5" />,
@@ -16,9 +16,10 @@ const ITEM_TYPE_COLORS = "text-gray-600 dark:text-gray-400"
 
 interface ItemCardProps {
   item: Item
+  onTogglePin?: (id: string) => void
 }
 
-export function ItemCard({ item }: ItemCardProps) {
+export function ItemCard({ item, onTogglePin }: ItemCardProps) {
   return (
     <div className="card transition-shadow hover:shadow-md">
       <div className="flex items-start gap-3">
@@ -38,13 +39,26 @@ export function ItemCard({ item }: ItemCardProps) {
                 </div>
               )}
             </div>
-            <Link
-              to={`/items/${item.id}`}
-              className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-black/5 hover:text-black dark:hover:bg-white/10 dark:hover:text-white transition-colors"
-              aria-label="View details"
-            >
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+            <div className="flex items-center gap-1">
+              {onTogglePin && (
+                <button
+                  type="button"
+                  onClick={() => onTogglePin(item.id)}
+                  className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-black/5 hover:text-black dark:hover:bg-white/10 dark:hover:text-white transition-colors"
+                  aria-label={item.is_pinned ? "Unpin" : "Pin"}
+                  title={item.is_pinned ? "Unpin item" : "Pin item"}
+                >
+                  {item.is_pinned ? <Pin className="h-4 w-4 fill-current" /> : <PinOff className="h-4 w-4" />}
+                </button>
+              )}
+              <Link
+                to={`/items/${item.id}`}
+                className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-black/5 hover:text-black dark:hover:bg-white/10 dark:hover:text-white transition-colors"
+                aria-label="View details"
+              >
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
 
           <div className="mt-2 flex items-center justify-between">

@@ -1,9 +1,9 @@
 import { useParams, useNavigate } from "react-router-dom"
 import { useState } from "react"
-import { useItem, useDeleteItem } from "@/hooks/use-items"
+import { useItem, useDeleteItem, useTogglePinItem, useCreateShare } from "@/hooks/use-items"
 import { formatBytes, formatDate } from "@/lib/utils"
 import { TagBadge } from "@/components/TagBadge"
-import { ArrowLeft, Trash2, Edit, Eye, EyeOff, Copy } from "lucide-react"
+import { ArrowLeft, Trash2, Edit, Eye, EyeOff, Copy, Pin, PinOff, Share2, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 
 export function ItemDetailPage() {
@@ -11,7 +11,12 @@ export function ItemDetailPage() {
   const navigate = useNavigate()
   const { data: item, isLoading, error } = useItem(id!)
   const deleteItem = useDeleteItem()
+  const togglePin = useTogglePinItem()
+  const createShare = useCreateShare()
   const [showPassword, setShowPassword] = useState(false)
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [shareUrl, setShareUrl] = useState<string>("")
+  const [expiresInHours, setExpiresInHours] = useState(24)
 
   const handleDelete = async () => {
     if (confirm("Are you sure you want to delete this item?")) {
@@ -24,6 +29,18 @@ export function ItemDetailPage() {
     if (item?.type === "login" && typeof item.content === "object") {
       await navigator.clipboard.writeText(item.content.password)
     }
+  }
+
+  const handleCreateShare = async () => {
+    const share = await createShare.mutateAsync({
+      itemId: id!,
+      expiresInHours,
+    })
+    setShareUrl(share.share_url)
+  }
+
+  const handleCopyShareUrl = async () => {
+    await navigator.clipboard.writeText(shareUrl)
   }
 
   if (isLoading) {
@@ -64,6 +81,22 @@ export function ItemDetailPage() {
           </div>
 
           <div className="flex gap-2">
+            <button
+              onClick={() => setShowShareModal(true)}
+              className="btn-ghost btn rounded-lg p-2"
+              aria-label="Share"
+              title="Share item"
+            >
+              <Share2 className="h-5 w-5" />
+            </button>
+            <button
+              onClick={() => togglePin.mutate(item.id)}
+              className="btn-ghost btn rounded-lg p-2"
+              aria-label={item.is_pinned ? "Unpin" : "Pin"}
+              title={item.is_pinned ? "Unpin item" : "Pin item"}
+            >
+              {item.is_pinned ? <Pin className="h-5 w-5 fill-current" /> : <PinOff className="h-5 w-5" />}
+            </button>
             <button
               onClick={() => navigate(`/items/${item.id}/edit`)}
               className="btn-ghost btn rounded-lg p-2"
@@ -187,6 +220,89 @@ export function ItemDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Share Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="card w-full max-w-md p-6 mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-black dark:text-white">Share Item</h2>
+              <button
+                onClick={() => {
+                  setShowShareModal(false)
+                  setShareUrl("")
+                }}
+                className="btn-ghost btn rounded-lg p-1"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {!shareUrl ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Expiration
+                  </label>
+                  <select
+                    value={expiresInHours}
+                    onChange={(e) => setExpiresInHours(Number(e.target.value))}
+                    className="input w-full"
+                  >
+                    <option value={1}>1 hour</option>
+                    <option value={6}>6 hours</option>
+                    <option value={24}>1 day</option>
+                    <option value={72}>3 days</option>
+                    <option value={168}>1 week</option>
+                  </select>
+                </div>
+                <button
+                  onClick={handleCreateShare}
+                  disabled={createShare.isPending}
+                  className="btn-primary btn w-full"
+                >
+                  {createShare.isPending ? "Creating..." : "Create Share Link"}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Share Link
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={shareUrl}
+                      className="input flex-1"
+                    />
+                    <button
+                      onClick={handleCopyShareUrl}
+                      className="btn-secondary btn"
+                      title="Copy link"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">
+                  Link expires in {expiresInHours} hour{expiresInHours > 1 ? "s" : ""}. Anyone with this link can view this item.
+                </p>
+                <button
+                  onClick={() => {
+                    setShareUrl("")
+                  }}
+                  className="btn-ghost btn w-full text-sm"
+                >
+                  Create another link
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

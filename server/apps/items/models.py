@@ -2,6 +2,7 @@ import uuid
 from django.conf import settings
 from django.db import models
 from django.contrib.postgres.search import SearchVectorField
+from django.utils import timezone
 
 
 class ItemType(models.TextChoices):
@@ -43,6 +44,8 @@ class Item(models.Model):
     file_size = models.BigIntegerField(blank=True, null=True)  # in bytes
     file_mimetype = models.CharField(max_length=200, blank=True)
 
+    is_pinned = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -51,10 +54,11 @@ class Item(models.Model):
 
     class Meta:
         db_table = "items"
-        ordering = ("-created_at",)
+        ordering = ("-is_pinned", "-created_at")
         indexes = [
             models.Index(fields=["user", "-created_at"]),
             models.Index(fields=["user", "type"]),
+            models.Index(fields=["user", "-is_pinned"]),
         ]
 
     def __str__(self) -> str:
@@ -71,3 +75,30 @@ class ItemTag(models.Model):
 
     def __str__(self) -> str:
         return f"{self.item} - {self.tag}"
+
+
+class SharedItem(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="shares")
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    access_count = models.IntegerField(default=0)
+    max_access_count = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "shared_items"
+        indexes = [
+            models.Index(fields=["token"]),
+            models.Index(fields=["-created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Share of {self.item}"
+
+    def is_valid(self) -> bool:
+        if self.max_access_count is not None and self.access_count >= self.max_access_count:
+            return False
+        if self.expires_at and timezone.now() > self.expires_at:
+            return False
+        return True

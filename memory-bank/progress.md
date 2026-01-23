@@ -1,7 +1,7 @@
 # Progress: Keepr
 
 ## Current Status
-**Testing & Bug Fixing Phase** - All core features implemented, UI redesigned to cobalt.tools aesthetic, actively testing and fixing issues
+**Feature Enhancement & Polish** - Adding power user features: pin/favorite, advanced keyboard shortcuts, batch operations, and temporary link sharing
 
 ## Completed
 - [x] Memory Bank initialized with all core files
@@ -13,9 +13,10 @@
 - [x] Security considerations documented
 - [x] Monorepo structure created (server/ + client/)
 - [x] Django backend project setup with DRF
-- [x] Django models (User, Item, Tag, ItemTag, EmailVerificationToken)
-- [x] Authentication views (Register, Login, Logout, Me, Verify)
-- [x] Items views (CRUD, Search, FileUpload, FileServe)
+- [x] Django models (User, Item, Tag, ItemTag, EmailVerificationToken, SharedItem)
+- [x] Authentication views (Register, Login, Logout, Me, Verify, UpdateSettings)
+- [x] Items views (CRUD, Search, FileUpload, FileServe, PinToggle, BatchDelete)
+- [x] Share views (CreateShare, ListShares, DeleteShare, ViewSharedItem)
 - [x] Tags views (CRUD)
 - [x] Custom exception handler
 - [x] React + Vite + Tailwind frontend setup
@@ -23,7 +24,7 @@
 - [x] React Query for data fetching
 - [x] API client with axios
 - [x] All UI components (Layout, ItemCard, TagBadge, SearchBar, ItemTypeFilter, TagFilter)
-- [x] All pages (Login, Feed, CreateItem, ItemDetail, Search, VerifyEmail)
+- [x] All pages (Login, Feed, CreateItem, ItemDetail, Search, VerifyEmail, SharedItem, Settings)
 - [x] Dark + Light theme support (cobalt.tools aesthetic)
 - [x] Tag filtering system
 - [x] Item type filtering
@@ -36,7 +37,49 @@
 - [x] **Visible borders (border-black/20, border-black/30)**
 - [x] **Removed description field from items**
 
-## Bug Fixes Completed (2026-01-23)
+## New Features Added (2026-01-23 - Session 2)
+
+### Pin/Favorite System
+- [x] Added `is_pinned` boolean field to Item model
+- [x] Pinned items ordered first (`-is_pinned`, `-created_at`)
+- [x] Pin toggle API endpoint (`/api/items/<id>/pin/`)
+- [x] Frontend: Pin/PinOff icons on ItemCard, FeedPage, ItemDetailPage
+- [x] Keyboard shortcuts hook for pin toggle
+
+### Keyboard Shortcuts Enhancement
+- [x] Type-to-search: auto-focus search when typing anywhere (not in input)
+- [x] User-defined create shortcut with full key combination support
+- [x] Backend: `create_shortcut` field expanded to 50 chars
+- [x] Frontend: Shortcut recorder UI with "Record" button
+- [x] Format shortcuts for display (Ctrl + Shift + N, Cmd + Enter)
+- [x] Parse and match keyboard events with modifiers
+
+### Batch Delete
+- [x] Batch delete API endpoint (`/api/items/batch-delete/`)
+- [x] Select mode toggle with checkboxes on items
+- [x] Select All / Clear buttons
+- [x] Confirmation dialog before batch delete
+
+### Temporary Link Sharing
+- [x] SharedItem model with token, expiration, access limits
+- [x] Create share link endpoint with configurable expiration
+- [x] List shares endpoint for item management
+- [x] Delete share endpoint
+- [x] Public view endpoint (no auth required)
+- [x] Share button on ItemDetailPage with modal
+- [x] New SharedItemPage for viewing shared items
+- [x] Password visibility on shared items
+
+### Create Page Auto-Focus
+- [x] Auto-focus content field on mount
+- [x] Different focus target per item type
+
+### Settings Page Reorganization
+- [x] Tabbed interface (General, Security, Data, Backup)
+- [x] Keyboard shortcuts configuration in General tab
+- [x] Shortcut recorder with live preview
+
+## Bug Fixes Completed (2026-01-23 - Session 2)
 
 ### Permission & Export Features
 - [x] Permission management: Backup settings only accessible to staff/superuser
@@ -128,6 +171,10 @@
 - [x] Admin full backup (all users' data)
 - [x] Password change feature
 - [x] Login with username OR email
+- [x] Import from backup (personal data restore for all users)
+- [x] Full backup import (staff/superuser only, restores complete database)
+- [x] Pre-import automatic backup (creates safety backup before full restore)
+- [x] Double confirmation modal for dangerous full import operations
 
 ### Phase 5: Launch Prep
 - [ ] Run migrations and create database
@@ -199,6 +246,57 @@ None currently - all reported issues have been resolved
 - Permission check: `request.user.is_staff or request.user.is_superuser`
 - Session preservation: Use `update_session_auth_hash(request, request.user)` after password change
 - API interceptor guard: Check `!window.location.pathname.startsWith("/login")` before redirect
+
+### 2026-01-23 (Import from Backup Feature)
+**Import Data Feature Implemented:**
+- New `ImportDataView` at `/api/import/data/`
+- Two import modes: personal data import (all users) and full backup import (staff/superuser only)
+- Personal import: Restores user's own items, tags, and media from exported ZIP
+- Full import: Restores complete database from admin backup (SQL dump + media files)
+
+**Personal Import (All Users):**
+- Imports from ZIP files created by "Export My Data" feature
+- Handles items.json, tags.json, and media files
+- File path matching: Searches ZIP for files by filename (handles subfolder structure)
+- Tag deduplication: Uses existing tags if same name exists, creates new ones otherwise
+- Preserves original timestamps for items
+
+**Full Backup Import (Staff/Superuser Only):**
+- Requires double confirmation with warning modals
+- First modal: Explains all risks (data loss, logged out, backup created)
+- Second modal: Final confirmation before proceeding
+- Pre-import safety: Automatically creates backup of current data to `LOCAL_BACKUP_DIR` as `pre_import_restore_{timestamp}.zip`
+- Database restore: Drops and recreates database, then restores from SQL dump
+- Connection cleanup: Uses `connections.close_all()` before database operations
+- PostgreSQL: Terminates all connections before dropping database, restores using `psql`
+- SQLite: Replaces database file directly
+
+**Safety Measures:**
+- Backend requires `confirmed=true` parameter for full import
+- Frontend uses `importStep` state for clean modal flow ("none" → "warning" → "confirm")
+- Auto-backup created before any destructive operations
+- Success message shows: database restored status, file count, item count, tag count, user count
+- Warning banner: "You have been logged out. Please log in again."
+
+**Frontend Implementation:**
+- Import section added to Settings page (both staff and non-staff views)
+- Staff users see "Full Backup Import" toggle switch
+- File input accepts `.zip` files only
+- Mutation accepts `file`, `fullImport`, and `confirmed` parameters
+- FormData handling: `full_import` and `confirmed` sent as strings ("true"/"false")
+
+**Bug Fixes During Implementation:**
+- Fixed FormData boolean handling: Backend checks for string values "true", "1", "yes"
+- Fixed file extraction: Search ZIP by filename suffix instead of exact path (handles subfolders)
+- Fixed SSL connection error: Close Django connections before terminating database connections
+- Fixed button double-click: Clean state machine with `importStep` enum instead of multiple booleans
+
+**Key Patterns:**
+- FormData sends strings, not booleans: `str(value).lower() in ("true", "1", "yes")`
+- File path matching: `path.startswith("media/") and path.endswith(filename)`
+- Pre-import backup: Create in temp, then `shutil.move()` to final location
+- Django connection cleanup: `connections.close_all()` before external database operations
+- Modal state management: Use enum state instead of multiple boolean flags
 
 ### 2026-01-22 (Local Backup & Security Improvements)
 **Local Backup Feature:**

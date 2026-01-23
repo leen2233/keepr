@@ -12,7 +12,10 @@ from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import Item, ItemType, Tag, ItemTag
+from django.utils import timezone
+from django.conf import settings
+from datetime import timedelta
+from .models import Item, ItemType, Tag, ItemTag, SharedItem
 
 User = get_user_model()
 
@@ -47,6 +50,7 @@ class ItemListView(APIView):
                 "file_name": item.file_name,
                 "file_size": item.file_size,
                 "file_mimetype": item.file_mimetype,
+                "is_pinned": item.is_pinned,
                 "created_at": item.created_at.isoformat(),
                 "updated_at": item.updated_at.isoformat(),
                 "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in tags],
@@ -132,6 +136,7 @@ class ItemDetailView(APIView):
             "id": str(item.id),
             "type": item.type,
             "title": item.title,
+            "is_pinned": item.is_pinned,
             "created_at": item.created_at.isoformat(),
             "updated_at": item.updated_at.isoformat(),
             "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in tags],
@@ -230,6 +235,7 @@ class ItemSearchView(APIView):
                 "type": item.type,
                 "title": item.title,
                 "file_name": item.file_name,
+                "is_pinned": item.is_pinned,
                 "created_at": item.created_at.isoformat(),
                 "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in tags],
             }
@@ -478,3 +484,206 @@ class FileServeView(APIView):
 
         response["Content-Disposition"] = f'inline; filename="{item.file_name}"'
         return response
+
+
+class ItemPinToggleView(APIView):
+    def post(self, request: Request, pk: uuid.UUID) -> Response:
+        try:
+            item = Item.objects.get(pk=pk, user=request.user)
+        except Item.DoesNotExist:
+            return Response(
+                {"error": {"code": "NOT_FOUND", "message": "Item not found"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        item.is_pinned = not item.is_pinned
+        item.save()
+
+        return Response(
+            {"data": {"item": {"id": str(item.id), "is_pinned": item.is_pinned}}}
+        )
+
+
+class ItemBatchDeleteView(APIView):
+    def post(self, request: Request) -> Response:
+        item_ids = request.data.get("item_ids", [])
+
+        if not item_ids:
+            return Response(
+                {"error": {"code": "NO_ITEMS", "message": "No items provided for deletion"}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Filter to only items owned by the user
+        items = Item.objects.filter(id__in=item_ids, user=request.user)
+
+        # Delete files from filesystem
+        for item in items:
+            if item.file_path:
+                full_path = os.path.join(settings.MEDIA_ROOT, item.file_path)
+                if os.path.exists(full_path):
+                    os.remove(full_path)
+
+        # Delete items (cascade will handle ItemTag deletion)
+        count = items.count()
+        items.delete()
+
+        return Response(
+            {"data": {"message": f"Successfully deleted {count} item(s)", "count": count}}
+        )
+
+
+class CreateShareView(APIView):
+    def post(self, request: Request, pk: uuid.UUID) -> Response:
+        try:
+            item = Item.objects.get(pk=pk, user=request.user)
+        except Item.DoesNotExist:
+            return Response(
+                {"error": {"code": "NOT_FOUND", "message": "Item not found"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Get expiration settings from request
+        expires_in_hours = request.data.get("expires_in_hours", 24)
+        max_access_count = request.data.get("max_access_count")
+
+        # Validate expires_in_hours (1 hour to 30 days)
+        if not isinstance(expires_in_hours, int) or expires_in_hours < 1 or expires_in_hours > 720:
+            return Response(
+                {"error": {"code": "INVALID_EXPIRATION", "message": "Expiration must be between 1 and 720 hours (30 days)"}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate max_access_count
+        if max_access_count is not None:
+            if not isinstance(max_access_count, int) or max_access_count < 1:
+                return Response(
+                    {"error": {"code": "INVALID_MAX_ACCESS", "message": "Max access count must be a positive integer"}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Calculate expiration date
+        expires_at = timezone.now() + timedelta(hours=expires_in_hours)
+
+        # Create share link
+        share = SharedItem.objects.create(
+            item=item,
+            expires_at=expires_at,
+            max_access_count=max_access_count,
+        )
+
+        # Generate share URL using frontend URL
+        share_url = f"{settings.FRONTEND_URL.rstrip('/')}/shared/{share.token}/"
+
+        return Response(
+            {
+                "data": {
+                    "share": {
+                        "id": str(share.id),
+                        "token": str(share.token),
+                        "share_url": share_url,
+                        "expires_at": share.expires_at.isoformat(),
+                        "max_access_count": share.max_access_count,
+                        "access_count": share.access_count,
+                    }
+                }
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class ViewSharedItemView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request: Request, token: uuid.UUID) -> Response:
+        try:
+            share = SharedItem.objects.get(token=token)
+        except SharedItem.DoesNotExist:
+            return Response(
+                {"error": {"code": "NOT_FOUND", "message": "Share link not found or has expired"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Check if share is valid
+        if not share.is_valid():
+            return Response(
+                {"error": {"code": "EXPIRED", "message": "This share link has expired or reached its access limit"}},
+                status=status.HTTP_410_GONE,
+            )
+
+        # Increment access count
+        share.access_count += 1
+        share.save()
+
+        # Get item data
+        item = share.item
+        tags = [it.tag for it in item.item_tags.all()]
+
+        data = {
+            "id": str(item.id),
+            "type": item.type,
+            "title": item.title,
+            "created_at": item.created_at.isoformat(),
+            "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in tags],
+        }
+
+        if item.content:
+            if item.type == ItemType.LOGIN:
+                data["content"] = json.loads(item.content)
+            else:
+                data["content"] = item.content
+
+        if item.file_path:
+            data["file"] = {
+                "name": item.file_name,
+                "size": item.file_size,
+                "mimetype": item.file_mimetype,
+                "url": f"/api/files/{item.id}/serve/",
+            }
+
+        return Response({"data": {"item": data}})
+
+
+class ListSharesView(APIView):
+    def get(self, request: Request, pk: uuid.UUID) -> Response:
+        try:
+            item = Item.objects.get(pk=pk, user=request.user)
+        except Item.DoesNotExist:
+            return Response(
+                {"error": {"code": "NOT_FOUND", "message": "Item not found"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        shares = SharedItem.objects.filter(item=item).order_by("-created_at")
+
+        shares_data = []
+        for share in shares:
+            share_url = f"{settings.FRONTEND_URL.rstrip('/')}/shared/{share.token}/"
+            shares_data.append({
+                "id": str(share.id),
+                "token": str(share.token),
+                "share_url": share_url,
+                "expires_at": share.expires_at.isoformat() if share.expires_at else None,
+                "max_access_count": share.max_access_count,
+                "access_count": share.access_count,
+                "is_valid": share.is_valid(),
+                "created_at": share.created_at.isoformat(),
+            })
+
+        return Response({"data": {"shares": shares_data}})
+
+
+class DeleteShareView(APIView):
+    def delete(self, request: Request, pk: uuid.UUID) -> Response:
+        try:
+            share = SharedItem.objects.get(pk=pk, item__user=request.user)
+        except SharedItem.DoesNotExist:
+            return Response(
+                {"error": {"code": "NOT_FOUND", "message": "Share not found"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        share.delete()
+
+        return Response({"data": {"message": "Share deleted successfully"}})

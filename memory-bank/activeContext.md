@@ -1,12 +1,96 @@
 # Active Context: Keepr
 
 ## Current Phase
-**UI/UX Refinement & Bug Fixes** - Design complete, testing in progress, fixing issues
+**Feature Enhancement & Polish** - Core features complete, adding quality-of-life improvements and power user features
 
 ## Current Focus
-Testing the application and fixing bugs as they arise. The UI has been redesigned to match cobalt.tools aesthetic - clean, minimal, with excellent light/dark mode support.
+Adding power user features: pin/favorite system, advanced keyboard shortcuts with key combinations, batch operations, and temporary link sharing. Settings page reorganized into tabs for better navigation.
 
-## Recent Changes & Fixes (2026-01-23)
+## Recent Changes & Fixes (2026-01-23 - Session 2)
+
+### New Features Implemented
+
+#### Pin/Favorite System
+- Added `is_pinned` boolean field to Item model (migration `0003_item_is_pinned.py`)
+- Pinned items appear first in feed: `ordering = ("-is_pinned", "-created_at")`
+- New `ItemPinToggleView` at `/api/items/<id>/pin/` - POST to toggle pin status
+- Frontend: Pin/PinOff icons on ItemCard, FeedPage, and ItemDetailPage
+- Pinned items show filled pin icon, unpinned show outline
+
+#### Keyboard Shortcuts Enhancement
+- **Removed Cmd/Ctrl+K shortcut** - replaced with type-to-search
+- **Type-to-search**: When not in an input, start typing to auto-focus search bar with typed text
+- **User-defined create shortcut**: Supports full key combinations (Ctrl+N, Shift+Enter, Alt+K, Cmd+N, etc.)
+- Backend: Changed `create_shortcut` from max_length=1 to max_length=50 (migration `0004_alter_user_create_shortcut.py`)
+- Frontend: New shortcut recorder UI with "Record" button - press any combo to capture
+- Settings page shows formatted shortcuts (e.g., "Ctrl + Shift + N", "Cmd + Enter")
+- Hook updated to parse and match key combinations with modifiers
+- Single-letter shortcuts skip type-to-search to avoid conflicts
+
+#### Batch Delete
+- New `ItemBatchDeleteView` at `/api/items/batch-delete/` - accepts list of item IDs
+- Frontend: Select mode toggle button with checkboxes on each item
+- Select All / Clear buttons for batch operations
+- Confirmation dialog before deleting multiple items
+- Deletes files from filesystem and database items with cascade
+
+#### Temporary Link Sharing
+- New `SharedItem` model for shareable links (migration `0004_shareditem.py` includes multiple migrations)
+- Fields: token (UUID), expires_at, max_access_count, access_count, created_at
+- `is_valid()` method checks expiration and access limits
+- Endpoints:
+  - `POST /api/items/<id>/share/` - Create share link with expiration settings
+  - `GET /api/items/<id>/shares/` - List all shares for an item
+  - `DELETE /api/shares/<id>/` - Delete a share link
+  - `GET /api/shared/<token>/` - Public endpoint to view shared item (no auth required)
+- Share URL uses `FRONTEND_URL` setting (not backend URL)
+- Frontend: Share button on ItemDetailPage, modal with expiration options (1h to 1 week)
+- New `SharedItemPage` at `/shared/:token` - public view for shared items
+- Login passwords on shared items: show/hide toggle + copy button
+
+#### Create Page Auto-Focus
+- Auto-focus content field when navigating to create new item page
+- Text items → content textarea
+- Login items → username field
+- File items → file upload button
+
+#### Settings Page Reorganization
+- Split into tabs: General, Security, Data, Backup (staff only)
+- General tab: Keyboard shortcuts configuration
+- Security tab: Change password
+- Data tab: Export/Import data
+- Backup tab: Backup configuration (staff/superuser)
+- Clean tab navigation with icons
+
+### Backend Changes
+- User model: `create_shortcut` field now accepts full key combinations (e.g., "ctrl+shift+n")
+- `UpdateSettingsView`: Validation updated to accept key combinations (1-50 chars)
+- `ItemPinToggleView`: Toggle endpoint for pin/unpin
+- `ItemBatchDeleteView`: Batch delete endpoint with file cleanup
+- `SharedItem` model: Token-based sharing with expiration and access limits
+- `CreateShareView`: Generate share links with configurable expiration
+- `ViewSharedItemView`: Public endpoint for shared items (no auth required)
+- `ListSharesView`: List all shares for an item
+- `DeleteShareView`: Delete share links
+
+### Frontend Changes
+- `use-keyboard-shortcuts.ts`: Complete rewrite for key combination support
+  - `parseShortcut()`: Parse "ctrl+shift+n" into components
+  - `formatShortcut()`: Format for display ("Ctrl + Shift + N")
+  - `shortcutMatches()`: Match keyboard events to shortcuts
+- `use-items.ts`: Added hooks for pin toggle, batch delete, shares
+- `types.ts`: Added `SharedItem` interface, updated `Item` with `is_pinned`
+- `SettingsPage.tsx`: Complete rewrite with tabbed interface and shortcut recorder
+- `CreateItemPage.tsx`: Added auto-focus for content fields
+- `SharedItemPage.tsx`: New page for viewing shared items
+- `App.tsx`: Added route for `/shared/:token` (public, no auth)
+
+### Migrations
+- `0003_item_is_pinned.py`: Add is_pinned field to Item
+- `0004_shareditem.py`: Create SharedItem model
+- `0004_alter_user_create_shortcut.py`: Expand create_shortcut field (users app)
+
+## Recent Changes & Fixes (2026-01-23 - Session 1)
 
 ### Permission Management
 - Backup settings (S3, local, scheduling) now restricted to staff/superuser only
@@ -49,6 +133,16 @@ Testing the application and fixing bugs as they arise. The UI has been redesigne
 - **Export fix**: Removed `created_at` from tag export (Tag model doesn't have this field)
 - **Login redirect fix**: API interceptor now checks if already on `/login` before redirecting on 401
 - **Password logout fix**: Added `update_session_auth_hash` to preserve session after password change
+
+### Import from Backup Feature
+- New `ImportDataView` at `/api/import/data/` - supports personal and full imports
+- **Personal import** (all users): Restores items, tags, and media from exported ZIP
+- **Full import** (staff/superuser only): Restores complete database from admin backup
+- File path matching handles subfolder structure (searches by filename suffix)
+- Pre-import automatic backup creates `pre_import_restore_{timestamp}.zip` in `LOCAL_BACKUP_DIR`
+- Double confirmation modal with clear warnings for full import
+- Success message shows counts: database restored, files, items, tags, users
+- Warning banner: "You have been logged out. Please log in again."
 
 ### Environment Variables Added
 - `ALLOW_SIGNUP` - Enable/disable user registration (default: `true`)
@@ -202,6 +296,7 @@ Django REST Framework with:
 - Zustand for global state (auth, filters, theme)
 - React Query for server state
 - **FormData handling**: Use `key` without `[]`, backend uses `getlist("key")`
+- **FormData booleans**: Backend must check string values `"true"`, `"1"`, `"yes"` (not boolean `True`)
 - **CSRF exemption**: Use `@method_decorator(csrf_exempt, name='dispatch')` + manual auth check
 - **Backup**: S3 backups use boto3, ZIP format with database dump + items JSON + media files
 - **Toggle switches**: Always use `overflow-hidden` on container, calculate `translate-x` based on width (ON: `calc(2.75rem-1.25rem-0.125rem)`, OFF: `translate-x-0.5`)
@@ -209,3 +304,7 @@ Django REST Framework with:
 - **Permission checks**: Use `request.user.is_staff or request.user.is_superuser` for admin-only features
 - **Session preservation**: Use `update_session_auth_hash(request, request.user)` after password change
 - **API interceptor guard**: Check `!window.location.pathname.startsWith("/login")` before redirecting on 401
+- **Modal state machine**: Use enum state (`"none" | "warning" | "confirm"`) instead of multiple booleans
+- **File path matching in ZIP**: Use `path.startswith("media/") and path.endswith(filename)` to handle subfolders
+- **Django connection cleanup**: Use `connections.close_all()` before external database operations (pg_dump/psql)
+- **Pre-import backup**: Create in temp, then `shutil.move()` to `LOCAL_BACKUP_DIR` for safety

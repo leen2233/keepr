@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useCreateItem } from "@/hooks/use-items"
 import { useTags, useCreateTag } from "@/hooks/use-tags"
@@ -35,7 +35,24 @@ export function CreateItemPage() {
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[5])
   const [showNewTag, setShowNewTag] = useState(false)
 
+  const contentRef = useRef<HTMLTextAreaElement>(null)
+  const loginUsernameRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const selectedItemType = ITEM_TYPES.find(t => t.value === type)!
+
+  // Auto-focus the appropriate content field on mount
+  useEffect(() => {
+    setTimeout(() => {
+      if (type === "text" && contentRef.current) {
+        contentRef.current.focus()
+      } else if (type === "login" && loginUsernameRef.current) {
+        loginUsernameRef.current.focus()
+      } else if (["image", "video", "file"].includes(type) && fileInputRef.current) {
+        fileInputRef.current.focus()
+      }
+    }, 100)
+  }, [type])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -179,6 +196,7 @@ export function CreateItemPage() {
               </label>
               <textarea
                 id="content"
+                ref={contentRef}
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 className="input min-h-[200px] font-mono"
@@ -196,6 +214,7 @@ export function CreateItemPage() {
                 </label>
                 <input
                   id="login-username"
+                  ref={loginUsernameRef}
                   type="text"
                   value={loginUsername}
                   onChange={(e) => setLoginUsername(e.target.value)}
@@ -242,6 +261,7 @@ export function CreateItemPage() {
               <div className="relative">
                 <input
                   id="file"
+                  ref={fileInputRef}
                   type="file"
                   onChange={(e) => setFile(e.target.files?.[0] || null)}
                   className="input file:mr-4 file:rounded-lg file:border-0 file:bg-black file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-gray-800 dark:file:bg-white dark:file:text-black dark:hover:file:bg-gray-200"

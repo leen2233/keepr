@@ -99,6 +99,7 @@ class LoginView(APIView):
                         "email_verified": user.email_verified,
                         "is_staff": user.is_staff,
                         "is_superuser": user.is_superuser,
+                        "create_shortcut": user.create_shortcut,
                     }
                 }
             }
@@ -123,6 +124,7 @@ class MeView(APIView):
                         "email_verified": request.user.email_verified,
                         "is_staff": request.user.is_staff,
                         "is_superuser": request.user.is_superuser,
+                        "create_shortcut": request.user.create_shortcut,
                     }
                 }
             }
@@ -200,4 +202,35 @@ class ChangePasswordView(APIView):
 
         return Response(
             {"data": {"message": "Password changed successfully"}}
+        )
+
+
+class UpdateSettingsView(APIView):
+    def put(self, request: Request) -> Response:
+        create_shortcut = request.data.get("create_shortcut")
+
+        if create_shortcut is not None:
+            # Validate it's a string
+            if not isinstance(create_shortcut, str) or len(create_shortcut) == 0 or len(create_shortcut) > 50:
+                return Response(
+                    {"error": {"code": "INVALID_SHORTCUT", "message": "Shortcut must be a valid key combination"}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            request.user.create_shortcut = create_shortcut
+            request.user.save()
+
+        return Response(
+            {
+                "data": {
+                    "user": {
+                        "id": str(request.user.id),
+                        "username": request.user.username,
+                        "email": request.user.email,
+                        "email_verified": request.user.email_verified,
+                        "is_staff": request.user.is_staff,
+                        "is_superuser": request.user.is_superuser,
+                        "create_shortcut": request.user.create_shortcut,
+                    }
+                }
+            }
         )

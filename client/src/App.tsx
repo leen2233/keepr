@@ -9,6 +9,7 @@ import { EditItemPage } from "@/pages/EditItemPage"
 import { ItemDetailPage } from "@/pages/ItemDetailPage"
 import { SearchPage } from "@/pages/SearchPage"
 import { SettingsPage } from "@/pages/SettingsPage"
+import { SharedItemPage } from "@/pages/SharedItemPage"
 import { useMe } from "@/hooks/use-auth"
 import { CircularProgress } from "./components/ui/CircularProgress"
 
@@ -36,6 +37,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/verify/:token" element={<VerifyEmailPage />} />
+        <Route path="/shared/:token" element={<SharedItemPage />} />
         <Route
           path="/"
           element={

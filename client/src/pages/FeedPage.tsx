@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTagFilter, useItemTypeFilter, useSearch } from "@/store"
-import { useItems } from "@/hooks/use-items"
+import { useItems, useTogglePinItem, useBatchDeleteItems } from "@/hooks/use-items"
 import { formatBytes, formatDate } from "@/lib/utils"
 import { SearchBar } from "@/components/SearchBar"
 import { TagFilter } from "@/components/TagFilter"
 import { ItemTypeFilter } from "@/components/ItemTypeFilter"
-import { FileText, Key, Image as ImageIcon, Video, File, Calendar, ArrowRight, Eye, EyeOff, Copy } from "lucide-react"
+import { FileText, Key, Image as ImageIcon, Video, File, Calendar, ArrowRight, Eye, EyeOff, Copy, Pin, PinOff, CheckSquare, Square, Trash2, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { Link } from "react-router-dom"
 
@@ -58,12 +58,17 @@ export function FeedPage() {
   const { selectedType } = useItemTypeFilter()
   const { searchQuery } = useSearch()
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set())
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
+  const [isSelectMode, setIsSelectMode] = useState(false)
 
   const { data: items, isLoading, error } = useItems(
     selectedTagIds.length > 0 ? selectedTagIds : undefined,
     selectedType || undefined,
     searchQuery || undefined
   )
+
+  const togglePin = useTogglePinItem()
+  const batchDelete = useBatchDeleteItems()
 
   const groupedItems = useMemo(() => {
     return items ? groupItemsByDate(items) : {}
@@ -85,6 +90,44 @@ export function FeedPage() {
     await navigator.clipboard.writeText(password)
   }
 
+  const toggleSelectMode = () => {
+    setIsSelectMode((prev) => !prev)
+    setSelectedItems(new Set())
+  }
+
+  const toggleItemSelection = (itemId: string) => {
+    setSelectedItems((prev) => {
+      const next = new Set(prev)
+      if (next.has(itemId)) {
+        next.delete(itemId)
+      } else {
+        next.add(itemId)
+      }
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    if (items) {
+      setSelectedItems(new Set(items.map((item) => item.id)))
+    }
+  }
+
+  const clearSelection = () => {
+    setSelectedItems(new Set())
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedItems.size === 0) return
+
+    const confirmed = confirm(`Are you sure you want to delete ${selectedItems.size} item(s)?`)
+    if (!confirmed) return
+
+    await batchDelete.mutateAsync(Array.from(selectedItems))
+    setSelectedItems(new Set())
+    setIsSelectMode(false)
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -93,6 +136,52 @@ export function FeedPage() {
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {items?.length || 0} {items?.length === 1 ? "item" : "items"}
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {!isSelectMode ? (
+            <button
+              onClick={toggleSelectMode}
+              className="btn-secondary btn flex items-center gap-2"
+              title="Select multiple items to delete"
+            >
+              <CheckSquare className="h-4 w-4" />
+              <span className="hidden sm:inline">Select</span>
+            </button>
+          ) : (
+            <>
+              <span className="text-sm text-gray-600 dark:text-gray-400">
+                {selectedItems.size} selected
+              </span>
+              <button
+                onClick={selectAll}
+                className="btn-ghost btn text-sm"
+                disabled={!items || items.length === 0}
+              >
+                Select All
+              </button>
+              <button
+                onClick={clearSelection}
+                className="btn-ghost btn text-sm"
+                disabled={selectedItems.size === 0}
+              >
+                Clear
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                className="btn btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                disabled={selectedItems.size === 0}
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="hidden sm:inline">Delete</span>
+              </button>
+              <button
+                onClick={toggleSelectMode}
+                className="btn-ghost btn"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -145,8 +234,23 @@ export function FeedPage() {
               <div className="space-y-3">
                 {dateItems.map((item) => (
                   <div key={item.id} className="group">
-                    <div className="card">
+                    <div className={`card ${isSelectMode ? "cursor-pointer" : ""}`} onClick={() => isSelectMode && toggleItemSelection(item.id)}>
                       <div className="flex items-start gap-3">
+                        {isSelectMode && (
+                          <div className="flex-shrink-0 pt-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleItemSelection(item.id)
+                              }}
+                              className="rounded text-gray-400 hover:text-black dark:hover:text-white transition-colors"
+                              aria-label="Select item"
+                            >
+                              {selectedItems.has(item.id) ? <CheckSquare className="h-5 w-5 fill-current" /> : <Square className="h-5 w-5" />}
+                            </button>
+                          </div>
+                        )}
                         <div className={`mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${ITEM_COLOR}`}>
                           {ITEM_ICONS[item.type]}
                         </div>
@@ -163,13 +267,26 @@ export function FeedPage() {
                               </p>
                             </div>
 
-                            <Link
-                              to={`/items/${item.id}`}
-                              className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-black/5 hover:text-black dark:hover:bg-white/10 dark:hover:text-white transition-colors"
-                              aria-label="View details"
-                            >
-                              <ArrowRight className="h-4 w-4" />
-                            </Link>
+                            {!isSelectMode && (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => togglePin.mutate(item.id)}
+                                  className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-black/5 hover:text-black dark:hover:bg-white/10 dark:hover:text-white transition-colors"
+                                  aria-label={item.is_pinned ? "Unpin" : "Pin"}
+                                  title={item.is_pinned ? "Unpin item" : "Pin item"}
+                                >
+                                  {item.is_pinned ? <Pin className="h-4 w-4 fill-current" /> : <PinOff className="h-4 w-4" />}
+                                </button>
+                                <Link
+                                  to={`/items/${item.id}`}
+                                  className="flex-shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-black/5 hover:text-black dark:hover:bg-white/10 dark:hover:text-white transition-colors"
+                                  aria-label="View details"
+                                >
+                                  <ArrowRight className="h-4 w-4" />
+                                </Link>
+                              </div>
+                            )}
                           </div>
 
                           {item.tags.length > 0 && (

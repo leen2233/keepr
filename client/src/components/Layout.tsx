@@ -1,6 +1,7 @@
 import { Outlet, Link, useNavigate } from "react-router-dom"
 import { useAuthStore, useTheme } from "@/store"
 import { useLogout, useMe } from "@/hooks/use-auth"
+import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { Moon, Sun, LogOut, Plus, Home, Box, Settings } from "lucide-react"
 
 export function Layout() {
@@ -8,6 +9,9 @@ export function Layout() {
   const { data: me } = useMe()
   const logout = useLogout()
   const navigate = useNavigate()
+
+  // Initialize keyboard shortcuts with user's create shortcut
+  useKeyboardShortcuts(me?.create_shortcut || undefined)
 
   const handleLogout = () => logout.mutate()
 

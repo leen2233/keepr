@@ -48,7 +48,7 @@ export function SearchBar() {
         type="search"
         value={localQuery}
         onChange={handleChange}
-        placeholder="Search..."
+        placeholder="Search... (type anywhere to search)"
         className="input pl-10 pr-10"
       />
       {localQuery && (

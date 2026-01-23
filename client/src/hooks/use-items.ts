@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import api from "@/lib/api"
-import type { Item, ItemType, ApiResponse, ItemsResponse, ItemResponse } from "@/lib/types"
+import type { Item, ItemType, ApiResponse, ItemsResponse, ItemResponse, SharedItem } from "@/lib/types"
 
 const ITEMS_QUERY_KEY = ["items"]
 
@@ -113,6 +113,78 @@ export function useSearchItems() {
     mutationFn: async (query: string) => {
       const response = await api.get<ItemsResponse>(`/items/search/?q=${encodeURIComponent(query)}`)
       return response.data.data.items
+    },
+  })
+}
+
+export function useTogglePinItem() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await api.post<{ data: { item: { id: string; is_pinned: boolean } } }>(`/items/${id}/pin/`)
+      return response.data.data.item
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY })
+    },
+  })
+}
+
+export function useBatchDeleteItems() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (itemIds: string[]) => {
+      const response = await api.post<{ data: { message: string; count: number } }>(`/items/batch-delete/`, {
+        item_ids: itemIds,
+      })
+      return response.data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ITEMS_QUERY_KEY })
+    },
+  })
+}
+
+export function useCreateShare() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ itemId, expiresInHours = 24, maxAccessCount }: {
+      itemId: string
+      expiresInHours?: number
+      maxAccessCount?: number
+    }) => {
+      const response = await api.post<{ data: { share: SharedItem } }>(`/items/${itemId}/share/`, {
+        expires_in_hours: expiresInHours,
+        max_access_count: maxAccessCount,
+      })
+      return response.data.data.share
+    },
+  })
+}
+
+export function useItemShares(itemId: string) {
+  return useQuery({
+    queryKey: ["shares", itemId],
+    queryFn: async () => {
+      const response = await api.get<{ data: { shares: SharedItem[] } }>(`/items/${itemId}/shares/`)
+      return response.data.data.shares
+    },
+    enabled: !!itemId,
+  })
+}
+
+export function useDeleteShare() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (shareId: string) => {
+      await api.delete(`/shares/${shareId}/`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["shares"] })
     },
   })
 }
