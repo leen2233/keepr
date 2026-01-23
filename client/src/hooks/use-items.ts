@@ -151,14 +151,18 @@ export function useCreateShare() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ itemId, expiresInHours = 24, maxAccessCount }: {
+    mutationFn: async ({ itemId, expiresInHours = 24, maxAccessCount, slug, password }: {
       itemId: string
       expiresInHours?: number
       maxAccessCount?: number
+      slug?: string
+      password?: string
     }) => {
       const response = await api.post<{ data: { share: SharedItem } }>(`/items/${itemId}/share/`, {
         expires_in_hours: expiresInHours,
         max_access_count: maxAccessCount,
+        slug,
+        password,
       })
       return response.data.data.share
     },

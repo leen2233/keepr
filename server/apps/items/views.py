@@ -543,9 +543,11 @@ class CreateShareView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Get expiration settings from request
+        # Get settings from request
         expires_in_hours = request.data.get("expires_in_hours", 24)
         max_access_count = request.data.get("max_access_count")
+        slug = request.data.get("slug", "").strip() or None
+        password = request.data.get("password", "")
 
         # Validate expires_in_hours (1 hour to 30 days)
         if not isinstance(expires_in_hours, int) or expires_in_hours < 1 or expires_in_hours > 720:
@@ -562,6 +564,32 @@ class CreateShareView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Validate slug format (alphanumeric, dashes, underscores only)
+        if slug:
+            import re
+            if not re.match(r'^[a-zA-Z0-9_-]+$', slug):
+                return Response(
+                    {"error": {"code": "INVALID_SLUG", "message": "Slug can only contain letters, numbers, dashes, and underscores"}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if len(slug) < 3:
+                return Response(
+                    {"error": {"code": "INVALID_SLUG", "message": "Slug must be at least 3 characters long"}},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Check if slug is already taken
+            existing_share = SharedItem.objects.filter(slug=slug).first()
+            if existing_share:
+                if existing_share.is_valid():
+                    # Slug exists and is still valid - return error
+                    return Response(
+                        {"error": {"code": "SLUG_TAKEN", "message": "This custom path is already in use. Please choose another."}},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                else:
+                    # Slug exists but is expired - delete the old share and reuse the slug
+                    existing_share.delete()
+
         # Calculate expiration date
         expires_at = timezone.now() + timedelta(hours=expires_in_hours)
 
@@ -570,10 +598,17 @@ class CreateShareView(APIView):
             item=item,
             expires_at=expires_at,
             max_access_count=max_access_count,
+            slug=slug,
         )
 
+        # Set password if provided
+        if password:
+            share.set_password(password)
+            share.save()
+
         # Generate share URL using frontend URL
-        share_url = f"{settings.FRONTEND_URL.rstrip('/')}/shared/{share.token}/"
+        share_identifier = share.slug or str(share.token)
+        share_url = f"{settings.FRONTEND_URL.rstrip('/')}/shared/{share_identifier}/"
 
         return Response(
             {
@@ -581,10 +616,12 @@ class CreateShareView(APIView):
                     "share": {
                         "id": str(share.id),
                         "token": str(share.token),
+                        "slug": share.slug,
                         "share_url": share_url,
                         "expires_at": share.expires_at.isoformat(),
                         "max_access_count": share.max_access_count,
                         "access_count": share.access_count,
+                        "has_password": share.has_password,
                     }
                 }
             },
@@ -596,10 +633,17 @@ class ViewSharedItemView(APIView):
     authentication_classes = []
     permission_classes = []
 
-    def get(self, request: Request, token: uuid.UUID) -> Response:
+    def _get_share(self, identifier: str) -> SharedItem | None:
+        """Get share by slug or token."""
         try:
-            share = SharedItem.objects.get(token=token)
-        except SharedItem.DoesNotExist:
+            # Try slug first, then token
+            return SharedItem.objects.filter(slug=identifier).first() or SharedItem.objects.get(token=identifier)
+        except (SharedItem.DoesNotExist,):
+            return None
+
+    def get(self, request: Request, identifier: str) -> Response:
+        share = self._get_share(identifier)
+        if not share:
             return Response(
                 {"error": {"code": "NOT_FOUND", "message": "Share link not found or has expired"}},
                 status=status.HTTP_404_NOT_FOUND,
@@ -610,6 +654,74 @@ class ViewSharedItemView(APIView):
             return Response(
                 {"error": {"code": "EXPIRED", "message": "This share link has expired or reached its access limit"}},
                 status=status.HTTP_410_GONE,
+            )
+
+        # Check if password is required
+        if share.has_password:
+            # Return metadata without item content, indicating password is needed
+            return Response({
+                "data": {
+                    "requires_password": True,
+                    "message": "This shared item requires a password to view."
+                }
+            })
+
+        # Increment access count (only for non-password or already unlocked views)
+        share.access_count += 1
+        share.save()
+
+        # Get item data
+        item = share.item
+        tags = [it.tag for it in item.item_tags.all()]
+
+        data = {
+            "id": str(item.id),
+            "type": item.type,
+            "title": item.title,
+            "created_at": item.created_at.isoformat(),
+            "tags": [{"id": str(t.id), "name": t.name, "color": t.color} for t in tags],
+        }
+
+        if item.content:
+            if item.type == ItemType.LOGIN:
+                data["content"] = json.loads(item.content)
+            else:
+                data["content"] = item.content
+
+        if item.file_path:
+            data["file"] = {
+                "name": item.file_name,
+                "size": item.file_size,
+                "mimetype": item.file_mimetype,
+                "url": f"/api/files/{item.id}/serve/",
+            }
+
+        return Response({"data": {"item": data}})
+
+    def post(self, request: Request, identifier: str) -> Response:
+        """POST endpoint to unlock password-protected shares."""
+        share = self._get_share(identifier)
+        if not share:
+            return Response(
+                {"error": {"code": "NOT_FOUND", "message": "Share link not found or has expired"}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Check if share is valid
+        if not share.is_valid():
+            return Response(
+                {"error": {"code": "EXPIRED", "message": "This share link has expired or reached its access limit"}},
+                status=status.HTTP_410_GONE,
+            )
+
+        # Get password from request
+        password = request.data.get("password", "")
+
+        # Verify password
+        if not share.check_password(password):
+            return Response(
+                {"error": {"code": "INVALID_PASSWORD", "message": "Incorrect password"}},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
 
         # Increment access count
@@ -659,15 +771,18 @@ class ListSharesView(APIView):
 
         shares_data = []
         for share in shares:
-            share_url = f"{settings.FRONTEND_URL.rstrip('/')}/shared/{share.token}/"
+            share_identifier = share.slug or str(share.token)
+            share_url = f"{settings.FRONTEND_URL.rstrip('/')}/shared/{share_identifier}/"
             shares_data.append({
                 "id": str(share.id),
                 "token": str(share.token),
+                "slug": share.slug,
                 "share_url": share_url,
                 "expires_at": share.expires_at.isoformat() if share.expires_at else None,
                 "max_access_count": share.max_access_count,
                 "access_count": share.access_count,
                 "is_valid": share.is_valid(),
+                "has_password": share.has_password,
                 "created_at": share.created_at.isoformat(),
             })
 

@@ -6,6 +6,26 @@
 ## Current Focus
 Adding power user features: pin/favorite system, advanced keyboard shortcuts with key combinations, batch operations, and temporary link sharing. Settings page reorganized into tabs for better navigation.
 
+## Recent Changes & Fixes (2026-01-23 - Session 3)
+
+### Custom Share Paths & Password Protection
+- **Custom slugs**: Users can create memorable share links like `/shared/my-vacation-photos/` instead of random UUIDs
+- **Password protection**: Share links can be protected with a password - viewers must enter password to view
+- **Slug reuse**: If a custom slug's share expires, the slug is automatically deleted and can be reused
+- **Slug validation**: 3+ characters, alphanumeric with dashes and underscores only
+- **API changes**:
+  - `SharedItem` model: Added `slug` (SlugField) and `password_hash` fields
+  - `CreateShareView`: Accepts `slug` and `password` parameters, validates and handles slug conflicts
+  - `ViewSharedItemView`: Uses `<str:identifier>` in URL pattern to support both slugs and tokens
+  - Password-protected shares return `requires_password: true` on GET, require POST with password
+- **Frontend changes**:
+  - Share modal: Added custom path input with preview `/shared/[custom-path]`
+  - Share modal: Added password input with show/hide toggle
+  - SharedItemPage: Shows password prompt for protected shares, no redirect on wrong password
+  - Fixed error message display: Extracts actual API error messages instead of generic Axios errors
+- **Bug fix**: API interceptor no longer redirects to login on 401 for shared item unlock attempts
+- **Migration**: `0006_shareditem_slug_and_password.py` - adds slug and password_hash fields
+
 ## Recent Changes & Fixes (2026-01-23 - Session 2)
 
 ### New Features Implemented

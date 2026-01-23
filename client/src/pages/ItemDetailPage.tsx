@@ -3,7 +3,7 @@ import { useState } from "react"
 import { useItem, useDeleteItem, useTogglePinItem, useCreateShare } from "@/hooks/use-items"
 import { formatBytes, formatDate } from "@/lib/utils"
 import { TagBadge } from "@/components/TagBadge"
-import { ArrowLeft, Trash2, Edit, Eye, EyeOff, Copy, Pin, PinOff, Share2, X } from "lucide-react"
+import { ArrowLeft, Trash2, Edit, Eye, EyeOff, Copy, Pin, PinOff, Share2, X, Lock, Link as LinkIcon } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 
 export function ItemDetailPage() {
@@ -17,6 +17,9 @@ export function ItemDetailPage() {
   const [showShareModal, setShowShareModal] = useState(false)
   const [shareUrl, setShareUrl] = useState<string>("")
   const [expiresInHours, setExpiresInHours] = useState(24)
+  const [customSlug, setCustomSlug] = useState<string>("")
+  const [sharePassword, setSharePassword] = useState<string>("")
+  const [showSharePassword, setShowSharePassword] = useState(false)
 
   const handleDelete = async () => {
     if (confirm("Are you sure you want to delete this item?")) {
@@ -35,12 +38,21 @@ export function ItemDetailPage() {
     const share = await createShare.mutateAsync({
       itemId: id!,
       expiresInHours,
+      slug: customSlug || undefined,
+      password: sharePassword || undefined,
     })
     setShareUrl(share.share_url)
   }
 
   const handleCopyShareUrl = async () => {
     await navigator.clipboard.writeText(shareUrl)
+  }
+
+  const handleCloseShareModal = () => {
+    setShowShareModal(false)
+    setShareUrl("")
+    setCustomSlug("")
+    setSharePassword("")
   }
 
   if (isLoading) {
@@ -228,10 +240,7 @@ export function ItemDetailPage() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-black dark:text-white">Share Item</h2>
               <button
-                onClick={() => {
-                  setShowShareModal(false)
-                  setShareUrl("")
-                }}
+                onClick={handleCloseShareModal}
                 className="btn-ghost btn rounded-lg p-1"
                 aria-label="Close"
               >
@@ -241,6 +250,56 @@ export function ItemDetailPage() {
 
             {!shareUrl ? (
               <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <div className="flex items-center gap-1.5">
+                      <LinkIcon className="h-3.5 w-3.5" />
+                      Custom path (optional)
+                    </div>
+                  </label>
+                  <div className="flex items-center gap-1 text-sm text-gray-500 mb-1">
+                    <span className="text-gray-400">/shared/</span>
+                    <input
+                      type="text"
+                      value={customSlug}
+                      onChange={(e) => setCustomSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ""))}
+                      placeholder="my-custom-link"
+                      className="input flex-1"
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Leave empty for random link. Use 3+ characters (letters, numbers, -, _)
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <div className="flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5" />
+                      Password (optional)
+                    </div>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showSharePassword ? "text" : "password"}
+                      value={sharePassword}
+                      onChange={(e) => setSharePassword(e.target.value)}
+                      placeholder="Enter password to protect this link"
+                      className="input w-full pr-8"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSharePassword(!showSharePassword)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black dark:hover:text-white"
+                    >
+                      {showSharePassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Leave empty for public access. Viewers must enter this password.
+                  </p>
+                </div>
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Expiration
@@ -257,6 +316,15 @@ export function ItemDetailPage() {
                     <option value={168}>1 week</option>
                   </select>
                 </div>
+
+                {createShare.error && (
+                  <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 p-2 rounded">
+                    {(createShare.error as any).response?.data?.error?.message ||
+                     (createShare.error as any).message ||
+                     "Failed to create share link"}
+                  </div>
+                )}
+
                 <button
                   onClick={handleCreateShare}
                   disabled={createShare.isPending}
@@ -288,7 +356,9 @@ export function ItemDetailPage() {
                   </div>
                 </div>
                 <p className="text-xs text-gray-500">
-                  Link expires in {expiresInHours} hour{expiresInHours > 1 ? "s" : ""}. Anyone with this link can view this item.
+                  Link expires in {expiresInHours} hour{expiresInHours > 1 ? "s" : ""}.
+                  {sharePassword && " Protected with password."}
+                  {!sharePassword && " Anyone with this link can view this item."}
                 </p>
                 <button
                   onClick={() => {

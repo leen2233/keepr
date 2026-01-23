@@ -81,6 +81,8 @@ class SharedItem(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="shares")
     token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    slug = models.SlugField(max_length=100, unique=True, null=True, blank=True)
+    password_hash = models.CharField(max_length=255, null=True, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     access_count = models.IntegerField(default=0)
@@ -90,6 +92,7 @@ class SharedItem(models.Model):
         db_table = "shared_items"
         indexes = [
             models.Index(fields=["token"]),
+            models.Index(fields=["slug"]),
             models.Index(fields=["-created_at"]),
         ]
 
@@ -102,3 +105,24 @@ class SharedItem(models.Model):
         if self.expires_at and timezone.now() > self.expires_at:
             return False
         return True
+
+    @property
+    def has_password(self) -> bool:
+        return bool(self.password_hash)
+
+    def check_password(self, password: str) -> bool:
+        """Check if provided password matches the stored hash."""
+        import hashlib
+        if not self.password_hash:
+            return True  # No password set
+        # Simple SHA-256 hash for now - consider using Django's make_password for better security
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        return self.password_hash == password_hash
+
+    def set_password(self, password: str) -> None:
+        """Set the password hash from plain text password."""
+        import hashlib
+        if password:
+            self.password_hash = hashlib.sha256(password.encode()).hexdigest()
+        else:
+            self.password_hash = None

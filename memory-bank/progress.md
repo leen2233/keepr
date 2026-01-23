@@ -37,6 +37,27 @@
 - [x] **Visible borders (border-black/20, border-black/30)**
 - [x] **Removed description field from items**
 
+## New Features Added (2026-01-23 - Session 3)
+
+### Custom Share Paths & Password Protection
+- [x] `slug` field added to SharedItem model (custom share paths)
+- [x] `password_hash` field added to SharedItem model (password protection)
+- [x] `has_password` property and `check_password()`/`set_password()` methods
+- [x] CreateShareView accepts `slug` and `password` parameters
+- [x] Slug validation: 3+ chars, alphanumeric with dashes and underscores
+- [x] Expired slugs automatically deleted for reuse
+- [x] ViewSharedItemView supports both slug and token identifiers
+- [x] Password-protected shares require POST with password to unlock
+- [x] Share modal UI: custom path input with preview
+- [x] Share modal UI: password input with show/hide toggle
+- [x] SharedItemPage shows password prompt (no redirect on wrong password)
+- [x] API interceptor excludes shared item requests from 401 redirect
+- [x] Error message display fixed to show actual API messages
+- [x] Migration: `0006_shareditem_slug_and_password.py`
+
+### Migration Needed
+- [ ] Run `python manage.py migrate` to apply `0006_shareditem_slug_and_password.py`
+
 ## New Features Added (2026-01-23 - Session 2)
 
 ### Pin/Favorite System

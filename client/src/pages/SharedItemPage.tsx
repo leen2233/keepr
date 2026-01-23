@@ -1,9 +1,9 @@
 import { useParams } from "react-router-dom"
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useMutation } from "@tanstack/react-query"
 import api from "@/lib/api"
 import { formatBytes, formatDate } from "@/lib/utils"
-import { FileText, Key, Image as ImageIcon, Video, File, AlertCircle, Eye, EyeOff, Copy } from "lucide-react"
+import { FileText, Key, Image as ImageIcon, Video, File, AlertCircle, Eye, EyeOff, Copy, Lock } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import type { Item } from "@/lib/types"
 
@@ -18,25 +18,52 @@ const ITEM_ICONS: Record<string, React.ReactNode> = {
 const ITEM_COLOR = "text-gray-600 dark:text-gray-400"
 
 export function SharedItemPage() {
-  const { token } = useParams<{ token: string }>()
+  const { token: identifier } = useParams<{ token: string }>()
   const [showPassword, setShowPassword] = useState(false)
+  const [unlockPassword, setUnlockPassword] = useState("")
+  const [showUnlockPassword, setShowUnlockPassword] = useState(false)
+  const [isUnlocked, setIsUnlocked] = useState(false)
 
-  const { data: item, isLoading, error } = useQuery({
-    queryKey: ["shared-item", token],
+  // Query to check if password is required (also returns item if no password)
+  const { data: checkData, isLoading: isChecking, error: checkError } = useQuery({
+    queryKey: ["shared-item-check", identifier, isUnlocked],
     queryFn: async () => {
-      const response = await api.get<{ data: { item: Item } }>(`/shared/${token}/`)
-      return response.data.data.item
+      const response = await api.get<{ data: any }>(`/shared/${identifier}/`)
+      return response.data.data
     },
-    enabled: !!token,
+    enabled: !!identifier,
+    retry: false,
   })
 
+  // Mutation to unlock with password
+  const unlockMutation = useMutation({
+    mutationFn: async (password: string) => {
+      const response = await api.post<{ data: { item: Item } }>(`/shared/${identifier}/`, { password })
+      return response.data.data.item
+    },
+    onSuccess: (data) => {
+      setIsUnlocked(true)
+    },
+  })
+
+  const handleUnlock = async (e: React.FormEvent) => {
+    e.preventDefault()
+    await unlockMutation.mutateAsync(unlockPassword)
+  }
+
   const handleCopyPassword = async () => {
+    const item = unlockMutation.data || checkData?.item
     if (item?.type === "login" && typeof item.content === "object") {
       await navigator.clipboard.writeText(item.content.password)
     }
   }
 
-  if (isLoading) {
+  // Get the item data - either from unlock mutation or from check query
+  const item = unlockMutation.data || checkData?.item
+  const requiresPassword = checkData?.requires_password && !isUnlocked
+
+  // Handle loading state for initial check
+  if (isChecking) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-gray-500 dark:text-gray-400">Loading...</div>
@@ -44,7 +71,82 @@ export function SharedItemPage() {
     )
   }
 
-  if (error || !item) {
+  // Handle error from check query
+  if (checkError) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="card bg-red-50 dark:bg-red-900/20 max-w-md">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            <div>
+              <h2 className="font-semibold text-red-800 dark:text-red-400">Link not found</h2>
+              <p className="text-sm text-red-600 dark:text-red-400">
+                This share link may have expired or reached its access limit.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Show password prompt if required and not unlocked
+  if (requiresPassword) {
+    return (
+      <div className="min-h-screen bg-gray-100 dark:bg-black flex items-center justify-center px-4">
+        <div className="card w-full max-w-md p-6">
+          <div className="flex flex-col items-center text-center mb-6">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black dark:bg-white mb-4">
+              <Lock className="h-6 w-6 text-white dark:text-black" />
+            </div>
+            <h1 className="text-xl font-semibold text-black dark:text-white mb-2">
+              Password Required
+            </h1>
+            <p className="text-sm text-gray-500">
+              This item is protected. Please enter the password to view it.
+            </p>
+          </div>
+
+          <form onSubmit={handleUnlock} className="space-y-4">
+            <div className="relative">
+              <input
+                type={showUnlockPassword ? "text" : "password"}
+                value={unlockPassword}
+                onChange={(e) => setUnlockPassword(e.target.value)}
+                placeholder="Enter password"
+                className="input w-full pr-10"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowUnlockPassword(!showUnlockPassword)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black dark:hover:text-white"
+              >
+                {showUnlockPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+
+            {unlockMutation.error && (
+              <div className="text-sm text-red-600 dark:text-red-400">
+                Incorrect password. Please try again.
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={unlockMutation.isPending || !unlockPassword}
+              className="btn-primary btn w-full"
+            >
+              {unlockMutation.isPending ? "Unlocking..." : "Unlock"}
+            </button>
+          </form>
+        </div>
+      </div>
+    )
+  }
+
+  // Handle no item case
+  if (!item) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="card bg-red-50 dark:bg-red-900/20 max-w-md">
