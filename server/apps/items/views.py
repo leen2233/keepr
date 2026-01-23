@@ -5,15 +5,14 @@ from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
 from django.http import FileResponse, HttpResponse
 from django.db.models import Q
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
-from django.conf import settings
 from datetime import timedelta
 from .models import Item, ItemType, Tag, ItemTag, SharedItem
 
@@ -22,8 +21,10 @@ User = get_user_model()
 
 class ItemListView(APIView):
     def get(self, request: Request) -> Response:
-        items = Item.objects.filter(user=request.user).select_related("user").prefetch_related("item_tags__tag")
+        # Build the base queryset with proper prefetching
+        items = Item.objects.filter(user=request.user).select_related("user")
 
+        # Apply filters before prefetching to avoid N+1 queries
         tag_ids = request.query_params.getlist("tag")
         if tag_ids:
             items = items.filter(item_tags__tag_id__in=tag_ids).distinct()
@@ -40,8 +41,33 @@ class ItemListView(APIView):
                 Q(content__icontains=search_query)
             )
 
+        # Get total count before pagination
+        total_count = items.count()
+
+        # Pagination parameters
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 20))
+
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 100:
+            page_size = 20  # Default and max page size
+
+        # Calculate pagination
+        start = (page - 1) * page_size
+        end = start + page_size
+        total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+
+        # Apply pagination
+        paginated_items = items[start:end]
+
+        # Prefetch item_tags with tag relationship after all filters are applied
+        paginated_items = paginated_items.prefetch_related("item_tags__tag")
+
         items_data = []
-        for item in items:
+        for item in paginated_items:
+            # Access the prefetched item_tags (no additional query)
             tags = [it.tag for it in item.item_tags.all()]
             item_data = {
                 "id": str(item.id),
@@ -63,7 +89,19 @@ class ItemListView(APIView):
                     item_data["content"] = item.content
             items_data.append(item_data)
 
-        return Response({"data": {"items": items_data}})
+        return Response({
+            "data": {
+                "items": items_data,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1,
+                }
+            }
+        })
 
     def post(self, request: Request) -> Response:
         item_type = request.data.get("type")
@@ -217,7 +255,20 @@ class ItemSearchView(APIView):
         query = request.query_params.get("q", "").strip()
 
         if not query:
-            return Response({"data": {"items": []}})
+            return Response({
+                "data": {
+                    "items": [],
+                    "query": query,
+                    "pagination": {
+                        "page": 1,
+                        "page_size": 20,
+                        "total_count": 0,
+                        "total_pages": 0,
+                        "has_next": False,
+                        "has_prev": False,
+                    }
+                }
+            })
 
         items = Item.objects.filter(
             user=request.user
@@ -227,8 +278,32 @@ class ItemSearchView(APIView):
             Q(content__icontains=query)
         ).distinct()
 
+        # Get total count before pagination
+        total_count = items.count()
+
+        # Pagination parameters
+        page = int(request.query_params.get("page", 1))
+        page_size = int(request.query_params.get("page_size", 20))
+
+        # Validate pagination parameters
+        if page < 1:
+            page = 1
+        if page_size < 1 or page_size > 100:
+            page_size = 20  # Default and max page size
+
+        # Calculate pagination
+        start = (page - 1) * page_size
+        end = start + page_size
+        total_pages = (total_count + page_size - 1) // page_size  # Ceiling division
+
+        # Apply pagination
+        paginated_items = items[start:end]
+
+        # Prefetch item_tags with tag relationship
+        paginated_items = paginated_items.prefetch_related("item_tags__tag")
+
         items_data = []
-        for item in items:
+        for item in paginated_items:
             tags = [it.tag for it in item.item_tags.all()]
             item_data = {
                 "id": str(item.id),
@@ -247,7 +322,20 @@ class ItemSearchView(APIView):
                     item_data["content"] = item.content
             items_data.append(item_data)
 
-        return Response({"data": {"items": items_data, "query": query}})
+        return Response({
+            "data": {
+                "items": items_data,
+                "query": query,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1,
+                }
+            }
+        })
 
 
 class TagListView(APIView):
@@ -329,27 +417,14 @@ class TagDetailView(APIView):
         return Response({"data": {"message": "Tag deleted successfully"}})
 
 
-@method_decorator(csrf_exempt, name='dispatch')
 class FileUploadView(APIView):
-    authentication_classes = []  # Bypass DRF's SessionAuthentication CSRF enforcement
-    permission_classes = []  # Bypass DRF's default permission check
+    # Use DRF's built-in SessionAuthentication which handles both auth and CSRF
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request: Request) -> Response:
-        # Manually check authentication using Django session
-        user_id = request.session.get('_auth_user_id')
-        if not user_id:
-            return Response(
-                {"error": {"code": "NOT_AUTHENTICATED", "message": "Authentication required"}},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
-
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return Response(
-                {"error": {"code": "NOT_AUTHENTICATED", "message": "Invalid user"}},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+        # User is authenticated by SessionAuthentication
+        user = request.user
 
         file: UploadedFile | None = request.FILES.get("file")
 

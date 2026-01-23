@@ -37,6 +37,21 @@
 - [x] **Visible borders (border-black/20, border-black/30)**
 - [x] **Removed description field from items**
 
+## New Features Added (2026-01-23 - Session 4)
+
+### Security Hardening (Critical Fixes)
+- [x] **Password hashing**: Replaced SHA-256 with Django's `make_password()` and `check_password()` (PBKDF2-SHA256 with salt)
+- [x] **CSRF protection**: Replaced `csrf_exempt` with proper `SessionAuthentication` and `IsAuthenticated` classes
+- [x] **API client CSRF**: Adds `csrfmiddlewaretoken` to FormData AND `X-CSRFToken` header for all requests
+- [x] **CreateItemPage**: Uses `api` instance instead of `fetch()` to get CSRF protection
+- [x] **API client headers**: Removed default `Content-Type` to allow correct `multipart/form-data; boundary=...` for file uploads
+- [x] **N+1 query fix**: Moved `prefetch_related` after filters in `ItemListView.get()`
+- [x] **Code cleanup**: Removed unused imports, duplicate imports
+
+### Notes on Breaking Changes
+- Existing shared item passwords will need to be re-set (hashing format changed from SHA-256 to PBKDF2)
+- All file uploads now require valid CSRF token (previously was bypassed)
+
 ## New Features Added (2026-01-23 - Session 3)
 
 ### Custom Share Paths & Password Protection

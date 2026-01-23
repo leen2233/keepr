@@ -5,6 +5,7 @@ import { useTags, useCreateTag } from "@/hooks/use-tags"
 import { useModal } from "@/store"
 import { TAG_COLORS } from "@/lib/utils"
 import { ArrowLeft, FileText, Key, Image as ImageIcon, Video, File } from "lucide-react"
+import api from "@/lib/api"
 
 type ItemType = "text" | "login" | "image" | "video" | "file"
 
@@ -83,11 +84,8 @@ export function CreateItemPage() {
         if (title) formData.append("title", title)
         selectedTagIds.forEach((id) => formData.append("tag_ids", id))
 
-        await fetch("/api/files/upload/", {
-          method: "POST",
-          body: formData,
-          credentials: "include",
-        })
+        // Use the api instance to get CSRF token automatically added
+        await api.post("/files/upload/", formData)
       }
 
       navigate("/")

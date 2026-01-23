@@ -1,22 +1,74 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import api from "@/lib/api"
-import type { Item, ItemType, ApiResponse, ItemsResponse, ItemResponse, SharedItem } from "@/lib/types"
+import type { Item, ItemType, ApiResponse, ItemsResponse, ItemResponse, SharedItem, PaginationInfo } from "@/lib/types"
 
 const ITEMS_QUERY_KEY = ["items"]
 
-export function useItems(tagIds?: string[], itemType?: ItemType, searchQuery?: string) {
+export function useItems(
+  tagIds?: string[],
+  itemType?: ItemType,
+  searchQuery?: string
+) {
+  const [page, setPage] = useState(1)
+  const [allItems, setAllItems] = useState<Item[]>([])
+  const [pagination, setPagination] = useState<PaginationInfo | null>(null)
+  const initializedRef = useRef(false)
+
+  // Memoize the filter key to detect actual changes
+  const filterKey = useMemo(() => JSON.stringify([tagIds, itemType, searchQuery]), [tagIds, itemType, searchQuery])
+
   const params = new URLSearchParams()
   tagIds?.forEach((id) => params.append("tag", id))
   if (itemType) params.set("type", itemType)
   if (searchQuery) params.set("q", searchQuery)
+  params.set("page", String(page))
+  params.set("page_size", "20")
 
-  return useQuery({
-    queryKey: [...ITEMS_QUERY_KEY, tagIds, itemType, searchQuery],
+  const query = useQuery({
+    queryKey: [...ITEMS_QUERY_KEY, tagIds, itemType, searchQuery, page],
     queryFn: async () => {
       const response = await api.get<ItemsResponse>(`/items/?${params.toString()}`)
-      return response.data.data.items
+      return response.data.data
     },
+    enabled: true,
   })
+
+  // Update all items and pagination when data changes
+  useEffect(() => {
+    if (query.data) {
+      const newItems = query.data.items
+      setAllItems((prev) => (page === 1 ? newItems : [...prev, ...newItems]))
+      setPagination(query.data.pagination)
+    }
+  }, [query.data, page])
+
+  // Reset when filters change (only after initialization)
+  useEffect(() => {
+    if (initializedRef.current) {
+      setPage(1)
+      setAllItems([])
+      setPagination(null)
+    } else {
+      initializedRef.current = true
+    }
+  }, [filterKey])
+
+  const loadMore = useCallback(() => {
+    if (pagination && pagination.has_next) {
+      setPage((p) => p + 1)
+    }
+  }, [pagination])
+
+  return {
+    items: allItems,
+    pagination,
+    isLoading: query.isLoading && page === 1,
+    isLoadingMore: query.isLoading && page > 1,
+    error: query.error,
+    loadMore,
+    hasNextPage: pagination?.has_next ?? false,
+  }
 }
 
 export function useItem(id: string) {
@@ -109,12 +161,68 @@ export function useDeleteItem() {
 }
 
 export function useSearchItems() {
-  return useMutation({
-    mutationFn: async (query: string) => {
-      const response = await api.get<ItemsResponse>(`/items/search/?q=${encodeURIComponent(query)}`)
-      return response.data.data.items
+  const [page, setPage] = useState(1)
+  const [allItems, setAllItems] = useState<Item[]>([])
+  const [pagination, setPagination] = useState<PaginationInfo | null>(null)
+  const [currentQuery, setCurrentQuery] = useState<string>("")
+
+  const searchMutation = useMutation({
+    mutationFn: async (query: string, pageNum: number = 1) => {
+      const params = new URLSearchParams()
+      params.set("q", query)
+      params.set("page", String(pageNum))
+      params.set("page_size", "20")
+      const response = await api.get<ItemsResponse>(`/items/search/?${params.toString()}`)
+      return { ...response.data.data, query }
     },
   })
+
+  const loadMore = () => {
+    if (pagination && pagination.has_next && !searchMutation.isPending && currentQuery) {
+      const nextPage = page + 1
+      searchMutation.mutate(currentQuery, {
+        onSuccess: (data) => {
+          setPage(nextPage)
+          setAllItems((prev) => [...prev, ...(data.items as Item[])])
+          setPagination(data.pagination)
+        },
+      })
+    }
+  }
+
+  const reset = () => {
+    setPage(1)
+    setAllItems([])
+    setPagination(null)
+    setCurrentQuery("")
+  }
+
+  // Handle initial search
+  const search = (query: string) => {
+    setPage(1)
+    setAllItems([])
+    setPagination(null)
+    setCurrentQuery(query)
+    searchMutation.mutate(query, {
+      onSuccess: (data) => {
+        setAllItems(data.items as Item[])
+        setPagination(data.pagination)
+      },
+    })
+  }
+
+  return {
+    items: allItems,
+    pagination,
+    isLoading: searchMutation.isPending && page === 1,
+    isLoadingMore: searchMutation.isPending && page > 1,
+    error: searchMutation.error,
+    search,
+    loadMore,
+    reset,
+    hasNextPage: pagination?.has_next ?? false,
+    isPending: searchMutation.isPending,
+  }
 }
 
 export function useTogglePinItem() {

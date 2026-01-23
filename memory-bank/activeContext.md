@@ -6,6 +6,36 @@
 ## Current Focus
 Adding power user features: pin/favorite system, advanced keyboard shortcuts with key combinations, batch operations, and temporary link sharing. Settings page reorganized into tabs for better navigation.
 
+## Recent Changes & Fixes (2026-01-23 - Session 4)
+
+### Security Hardening Fixes
+Critical security issues identified and fixed during codebase analysis:
+
+#### Password Hashing (CRITICAL)
+- **Before**: Plain SHA-256 without salt (vulnerable to rainbow table attacks)
+- **After**: Django's `make_password()` and `check_password()` (PBKDF2-SHA256 with salt)
+- **File**: `server/apps/items/models.py`
+- **Note**: Existing shared item passwords will need to be re-set (format changed)
+
+#### CSRF Protection (CRITICAL)
+- **Before**: `csrf_exempt` decorator with manual session authentication
+- **After**: Proper `SessionAuthentication` and `IsAuthenticated` permission classes
+- **File**: `server/apps/items/views.py` - `FileUploadView`
+- **Frontend fix**: API client now adds `csrfmiddlewaretoken` to FormData body AND `X-CSRFToken` header
+- **Frontend fix**: `CreateItemPage.tsx` now uses `api` instance instead of `fetch()` directly
+- **API client fix**: Removed default `Content-Type: application/json` to allow axios to set correct `multipart/form-data; boundary=...` header
+
+#### N+1 Query Fix
+- **Before**: `prefetch_related` called before filters, which could cause issues
+- **After**: All filters applied first, then `prefetch_related` at the end
+- **File**: `server/apps/items/views.py` - `ItemListView.get()`
+- **Improvement**: Django properly caches related objects for final filtered queryset
+
+### Other Code Quality Fixes
+- Removed unused imports (`method_decorator`, `csrf_exempt`)
+- Removed duplicate `from django.conf import settings`
+- Added imports for `SessionAuthentication` and `IsAuthenticated`
+
 ## Recent Changes & Fixes (2026-01-23 - Session 3)
 
 ### Custom Share Paths & Password Protection
@@ -250,11 +280,12 @@ Adding power user features: pin/favorite system, advanced keyboard shortcuts wit
 
 ### Backend Framework (CONFIRMED)
 Django REST Framework with:
-- DRF built-in session auth
+- DRF built-in session auth (`SessionAuthentication`, `IsAuthenticated`)
+- Django's built-in password hashing (`make_password`, `check_password`)
 - Custom file upload validators
 - django-cors-headers
 - EmailVerificationToken model for proper verification flow
-- **Important**: FileUploadView uses manual session authentication (bypasses DRF CSRF)
+- **CSRF**: All views use proper DRF authentication classes (no more `csrf_exempt`)
 
 ### Frontend (CONFIRMED)
 - React + Vite + Tailwind CSS
@@ -288,8 +319,10 @@ Django REST Framework with:
 ### Technical Questions Resolved
 1. **CORS configuration**: django-cors-headers configured
 2. **Chunked upload**: Deferred (not implemented for MVP)
-3. **CSRF for file uploads**: Manual session authentication bypasses DRF CSRF
+3. **CSRF for file uploads**: Use `SessionAuthentication` and `IsAuthenticated` - no more `csrf_exempt`
 4. **FormData array handling**: Use `key` without `[]` suffix, backend uses `getlist()`
+5. **Password hashing**: Use Django's `make_password()` and `check_password()` (PBKDF2-SHA256)
+6. **N+1 queries**: Apply filters first, then `prefetch_related` at the end
 
 ## Design Preferences (CURRENT)
 - **cobalt.tools aesthetic**: Minimal, clean, high contrast
@@ -317,7 +350,8 @@ Django REST Framework with:
 - React Query for server state
 - **FormData handling**: Use `key` without `[]`, backend uses `getlist("key")`
 - **FormData booleans**: Backend must check string values `"true"`, `"1"`, `"yes"` (not boolean `True`)
-- **CSRF exemption**: Use `@method_decorator(csrf_exempt, name='dispatch')` + manual auth check
+- **CSRF protection**: Use `SessionAuthentication` and `IsAuthenticated` for all views (including file uploads)
+- **CSRF in frontend**: API client automatically adds `X-CSRFToken` header AND `csrfmiddlewaretoken` to FormData
 - **Backup**: S3 backups use boto3, ZIP format with database dump + items JSON + media files
 - **Toggle switches**: Always use `overflow-hidden` on container, calculate `translate-x` based on width (ON: `calc(2.75rem-1.25rem-0.125rem)`, OFF: `translate-x-0.5`)
 - **Item-Tag relationship**: Access via `item.item_tags.all()`, then `item_tag.tag` (not `item.tags`)

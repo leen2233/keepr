@@ -1,6 +1,7 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { useSearchItems } from "@/hooks/use-items"
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll"
 import { ItemCard } from "@/components/ItemCard"
 import { Search } from "lucide-react"
 
@@ -12,12 +13,32 @@ export function SearchPage() {
   // Trigger search when query changes
   useEffect(() => {
     if (query.trim()) {
-      searchItems.mutate(query)
+      searchItems.search(query)
+    } else {
+      searchItems.reset()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query])
 
-  const results = query ? searchItems.data : []
+  const {
+    items,
+    pagination,
+    isLoading,
+    isLoadingMore,
+    error,
+    loadMore,
+    hasNextPage,
+  } = searchItems
+
+  // Set up infinite scroll
+  const observerTarget = useInfiniteScroll(
+    () => {
+      if (hasNextPage && !isLoadingMore) {
+        loadMore()
+      }
+    },
+    hasNextPage && !isLoading
+  )
 
   return (
     <div className="space-y-6">
@@ -28,17 +49,18 @@ export function SearchPage() {
         {query && (
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
             Query: <span className="font-medium">"{query}"</span>
+            {pagination && ` • ${pagination.total_count} result${pagination.total_count !== 1 ? "s" : ""}`}
           </p>
         )}
       </div>
 
       {query && (
         <>
-          {searchItems.isPending ? (
+          {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-gray-500 dark:text-gray-400">Searching...</div>
             </div>
-          ) : !results || results.length === 0 ? (
+          ) : !items || items.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Search className="mb-4 h-12 w-12 text-gray-400" />
               <h2 className="text-xl font-semibold text-black dark:text-white">
@@ -50,14 +72,27 @@ export function SearchPage() {
             </div>
           ) : (
             <>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Found {results.length} result{results.length !== 1 ? "s" : ""}
-              </p>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {results.map((item) => (
+                {items.map((item) => (
                   <ItemCard key={item.id} item={item} />
                 ))}
               </div>
+
+              {/* Infinite scroll observer target */}
+              {hasNextPage && (
+                <div ref={observerTarget} className="py-4 text-center">
+                  {isLoadingMore && (
+                    <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-black dark:border-gray-700 dark:border-t-white" />
+                  )}
+                </div>
+              )}
+
+              {/* End of results message */}
+              {!hasNextPage && items.length > 0 && pagination && pagination.total_count > items.length && (
+                <div className="py-4 text-center text-sm text-gray-600 dark:text-gray-400">
+                  Showing all {pagination.total_count} results
+                </div>
+              )}
             </>
           )}
         </>

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { useTagFilter, useItemTypeFilter, useSearch } from "@/store"
 import { useItems, useTogglePinItem, useBatchDeleteItems } from "@/hooks/use-items"
+import { useInfiniteScroll } from "@/hooks/use-infinite-scroll"
 import { formatBytes, formatDate } from "@/lib/utils"
 import { SearchBar } from "@/components/SearchBar"
 import { TagFilter } from "@/components/TagFilter"
@@ -61,7 +62,15 @@ export function FeedPage() {
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
   const [isSelectMode, setIsSelectMode] = useState(false)
 
-  const { data: items, isLoading, error } = useItems(
+  const {
+    items,
+    pagination,
+    isLoading,
+    isLoadingMore,
+    error,
+    loadMore,
+    hasNextPage,
+  } = useItems(
     selectedTagIds.length > 0 ? selectedTagIds : undefined,
     selectedType || undefined,
     searchQuery || undefined
@@ -69,6 +78,16 @@ export function FeedPage() {
 
   const togglePin = useTogglePinItem()
   const batchDelete = useBatchDeleteItems()
+
+  // Set up infinite scroll
+  const observerTarget = useInfiniteScroll(
+    () => {
+      if (hasNextPage && !isLoadingMore) {
+        loadMore()
+      }
+    },
+    hasNextPage && !isLoading
+  )
 
   const groupedItems = useMemo(() => {
     return items ? groupItemsByDate(items) : {}
@@ -134,7 +153,7 @@ export function FeedPage() {
         <div>
           <h1 className="text-2xl font-semibold text-black dark:text-white">Archive</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            {items?.length || 0} {items?.length === 1 ? "item" : "items"}
+            {pagination ? `${pagination.total_count} ${pagination.total_count === 1 ? "item" : "items"}` : `${items?.length || 0} ${items?.length === 1 ? "item" : "items"}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -380,6 +399,22 @@ export function FeedPage() {
               </div>
             </div>
           ))}
+
+          {/* Infinite scroll observer target */}
+          {hasNextPage && (
+            <div ref={observerTarget} className="py-4 text-center">
+              {isLoadingMore && (
+                <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-black dark:border-gray-700 dark:border-t-white" />
+              )}
+            </div>
+          )}
+
+          {/* End of results message */}
+          {!hasNextPage && items && items.length > 0 && pagination && pagination.total_count > items.length && (
+            <div className="py-4 text-center text-sm text-gray-600 dark:text-gray-400">
+              Showing all {pagination.total_count} items
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ from django.conf import settings
 from django.db import models
 from django.contrib.postgres.search import SearchVectorField
 from django.utils import timezone
+from django.contrib.auth.hashers import make_password, check_password as django_check_password
 
 
 class ItemType(models.TextChoices):
@@ -112,17 +113,13 @@ class SharedItem(models.Model):
 
     def check_password(self, password: str) -> bool:
         """Check if provided password matches the stored hash."""
-        import hashlib
         if not self.password_hash:
             return True  # No password set
-        # Simple SHA-256 hash for now - consider using Django's make_password for better security
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        return self.password_hash == password_hash
+        return django_check_password(password, self.password_hash)
 
     def set_password(self, password: str) -> None:
         """Set the password hash from plain text password."""
-        import hashlib
         if password:
-            self.password_hash = hashlib.sha256(password.encode()).hexdigest()
+            self.password_hash = make_password(password)
         else:
             self.password_hash = None
