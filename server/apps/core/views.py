@@ -8,9 +8,9 @@ import json
 import uuid
 from datetime import datetime
 from django.conf import settings
-from django.db import models, transaction, connections
+from django.db import models, transaction, connections, connection
 from django.utils import timezone
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -24,6 +24,33 @@ from apps.items.models import Item, Tag, ItemTag
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
+
+
+class HealthCheckView(APIView):
+    """
+    Health check endpoint - no authentication required.
+    Returns 200 OK if the service is healthy.
+    """
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request: Request) -> Response:
+        # Check database connection
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+        except Exception as e:
+            return Response(
+                {"status": "unhealthy", "database": "unavailable", "error": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({
+            "status": "healthy",
+            "service": "keepr-backend",
+            "database": "connected",
+            "version": "1.0.0"
+        })
 
 
 class BackupSettingsSerializer(serializers.ModelSerializer):

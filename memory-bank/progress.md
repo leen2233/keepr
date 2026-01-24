@@ -37,6 +37,34 @@
 - [x] **Visible borders (border-black/20, border-black/30)**
 - [x] **Removed description field from items**
 
+## New Features Added (2026-01-24 - Docker Deployment)
+
+### Complete Docker Setup
+- [x] **Backend Dockerfile** (`server/Dockerfile`): Python 3.13-slim base, gunicorn server, health checks
+- [x] **Frontend Dockerfile** (`client/Dockerfile`): Multi-stage build with nginx alpine, production-optimized
+- [x] **Nginx config** (`client/nginx.conf`): API proxy, media/static serving, SPA fallback, gzip compression
+- [x] **docker-compose.yml**: Full orchestration with PostgreSQL, backend, and frontend services
+- [x] **.dockerignore files**: Exclude unnecessary files from build context
+- [x] **.env.docker.example**: Complete environment configuration template
+- [x] **Persistent volumes**: postgres_data, media_files, backup_files
+- [x] **Health checks**: All services have health checks for proper startup ordering
+- [x] **Auto-restart**: All containers configured with `restart: unless-stopped`
+
+#### Usage
+```bash
+cp .env.docker.example .env
+# Edit .env with your settings
+docker compose up --build -d
+# Access at http://localhost:8080
+```
+
+#### Docker Services
+| Service | Description |
+|---------|-------------|
+| db | PostgreSQL 16 with persistent volume |
+| backend | Django with gunicorn (4 workers) |
+| frontend | Nginx serving React build with API proxy |
+
 ## New Features Added (2026-01-23 - Session 4)
 
 ### Security Hardening (Critical Fixes)
@@ -213,11 +241,11 @@
 - [x] Double confirmation modal for dangerous full import operations
 
 ### Phase 5: Launch Prep
-- [ ] Run migrations and create database
+- [x] Run migrations and create database
 - [ ] Test all features end-to-end
 - [ ] Performance optimization
 - [ ] Security audit
-- [ ] Deployment setup (Docker Compose)
+- [x] Deployment setup (Docker Compose)
 - [ ] Documentation (README)
 
 ## Next Steps

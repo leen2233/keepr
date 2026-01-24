@@ -58,6 +58,8 @@ keepr/
 │   │   ├── hooks/       # Custom React hooks
 │   │   ├── lib/         # Utilities, API client
 │   │   └── styles/      # Global styles, Tailwind config
+│   ├── Dockerfile       # Frontend Docker image (multi-stage with nginx)
+│   ├── nginx.conf       # Nginx config for production
 │   └── package.json
 │
 ├── server/              # Backend (Django)
@@ -67,10 +69,13 @@ keepr/
 │   │   ├── items/       # Items app (CRUD, tags)
 │   │   └── core/        # Core utilities, middleware
 │   ├── media/           # File storage (images, videos, files)
+│   ├── Dockerfile       # Backend Docker image (gunicorn)
 │   ├── manage.py
 │   ├── requirements.txt
 │   └── requirements-dev.txt
 │
+├── docker-compose.yml   # Docker Compose orchestration
+├── .env.docker.example  # Example Docker environment variables
 ├── memory-bank/         # This documentation
 └── CLAUDE.md            # Project instructions
 ```
@@ -116,17 +121,49 @@ npm install
 npm run dev
 ```
 
-### Production
+### Production (Docker)
 ```bash
-# Server (Django)
-cd server
-gunicorn config.wsgi:application  # or uvicorn for async
+# Quick start with Docker Compose
+cp .env.docker.example .env
+# Edit .env with your configuration
+docker compose up --build -d
 
-# Client
-cd client
-npm run build
-# Serve static files with nginx or similar
+# Access at http://localhost:8080
 ```
+
+#### Docker Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Nginx (Frontend)                            │
+│                   Port 8080 → Container                         │
+│                     ┌─────────────────┐                         │
+│                     │  React Build    │                         │
+│                     │  + API Proxy    │                         │
+│                     └────────┬────────┘                         │
+└──────────────────────────────┼──────────────────────────────────┘
+                               │
+                ┌──────────────┴──────────────┐
+                │                             │
+┌───────────────▼──────────┐    ┌────────────▼─────────────┐
+│   Django (Gunicorn)      │    │   PostgreSQL Database    │
+│   - Backend API          │    │   - Persistent Volume    │
+│   - File Upload          │    │                          │
+└──────────────────────────┘    └──────────────────────────┘
+         │
+         ▼
+┌─────────────────────────┐
+│   Volumes               │
+│   - media_files         │
+│   - backup_files        │
+└─────────────────────────┘
+```
+
+#### Docker Services
+| Service | Image | Ports | Volumes |
+|---------|-------|-------|---------|
+| db | postgres:16-alpine | - | postgres_data |
+| backend | python:3.13-slim | - | media_files, backup_files |
+| frontend | nginx:alpine | 8080:80 | - |
 
 ## Dependencies to Select
 
@@ -156,6 +193,14 @@ React Context + hooks (simple, built-in)
 - Gmail SMTP for production
 
 ## Deployment Considerations
+
+### Docker Deployment (COMPLETE)
+- **Single command setup**: `docker compose up --build`
+- **Included services**: PostgreSQL, Django (Gunicorn), Nginx (Frontend)
+- **Persistent volumes**: Database, media files, backups
+- **Health checks**: All services have health checks
+- **Auto-restart**: All containers restart on failure
+- **Production-ready**: Nginx serves static files and proxies API
 
 ### Initial (MVP)
 - Single VPS (DigitalOcean, Hetzner)

@@ -1,0 +1,102 @@
+# Docker Compose for Keepr - using pre-built images from Docker Hub
+# Usage:
+#   1. Copy .env.docker.example to .env and configure your settings
+#   2. Run: docker compose -f docker-compose.prod.yml up -d
+#   3. Access at http://localhost:8080
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16
+    container_name: keepr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-keepr}
+      POSTGRES_USER: ${POSTGRES_USER:-keepr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+    volumes:
+      # If DB_DIR is set, use host directory. Otherwise use Docker volume.
+      - ${DB_DIR:-postgres_data}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-keepr} -d ${POSTGRES_DB:-keepr}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - keepr-network
+
+  # Django Backend
+  backend:
+    image: leen2233/keepr-backend:latest
+    container_name: keepr-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-keepr}:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/${POSTGRES_DB:-keepr}
+
+      # Django Settings
+      SECRET_KEY: ${SECRET_KEY:-django-insecure-change-me-in-production}
+      DEBUG: ${DEBUG:-false}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080}
+
+      # Frontend URL (for share links)
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+
+      # Email Configuration (for user verification)
+      GMAIL_EMAIL: ${GMAIL_EMAIL:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+
+      # Signup Control
+      ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
+
+      # Admin Superuser Creation (optional)
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+
+      # Local Backup Directory (optional)
+      LOCAL_BACKUP_DIR: /app/backups
+
+      # File Size Limits (in bytes)
+      MAX_TEXT_SIZE: ${MAX_TEXT_SIZE:-102400}
+      MAX_IMAGE_SIZE: ${MAX_IMAGE_SIZE:-10485760}
+      MAX_VIDEO_SIZE: ${MAX_VIDEO_SIZE:-104857600}
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-20971520}
+    volumes:
+      # Mount media directory to host for easy access
+      - ${DATA_DIR:-./data}/media:/app/media
+      # Mount backup directory to host
+      - ${DATA_DIR:-./data}/backups:/app/backups
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    networks:
+      - keepr-network
+
+  # React Frontend (with nginx)
+  frontend:
+    image: leen2233/keepr-frontend:latest
+    container_name: keepr-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks:
+      - keepr-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  keepr-network:
+    driver: bridge

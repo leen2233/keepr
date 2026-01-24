@@ -30,6 +30,9 @@ db.sqlite3-journal
 /staticfiles
 /static
 
+# Docker data directories
+/data
+
 # Virtual Environment
 venv/
 env/

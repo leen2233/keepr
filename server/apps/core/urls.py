@@ -6,9 +6,11 @@ from .views import (
     TestS3ConnectionView,
     ExportDataView,
     ImportDataView,
+    HealthCheckView,
 )
 
 urlpatterns = [
+    path("health/", HealthCheckView.as_view(), name="health-check"),
     path("backup/settings/", BackupSettingsView.as_view(), name="backup-settings"),
     path("backup/logs/", BackupLogsView.as_view(), name="backup-logs"),
     path("backup/manual/", ManualBackupView.as_view(), name="manual-backup"),
